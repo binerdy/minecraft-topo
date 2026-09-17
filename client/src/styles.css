@@ -1,0 +1,42 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  color: #222;
+  background: #f4f4f2;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Keep the 200 m cells of the overview crisp while Leaflet scales tiles. */
+.mc-tiles {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.sel-handle {
+  background: #fff;
+  border: 2px solid #ff8800;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  cursor: nwse-resize;
+}
+
+.spawn-marker {
+  background: #d32f2f;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font: bold 12px/18px system-ui, sans-serif;
+  text-align: center;
+  cursor: grab;
+}
+
+.leaflet-container {
+  font-family: inherit;
+}

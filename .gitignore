@@ -1,0 +1,9 @@
+bin/
+obj/
+out/
+*.user
+.vs/
+client/node_modules/
+client/dist/
+client/.angular/
+.claude/launch.json

@@ -1,0 +1,229 @@
+<div class="panel">
+  <section>
+    <h2>1. Area</h2>
+    @if (selection(); as sel) {
+      <div class="grid2">
+        <label>East (E) <input type="number" step="1" [value]="sel.minE" (change)="setRect('minE', $event)" /></label>
+        <label>North (N) <input type="number" step="1" [value]="sel.minN" (change)="setRect('minN', $event)" /></label>
+        <label>Width (m) <input type="number" step="1" min="16" [value]="sel.maxE - sel.minE" (change)="setRect('width', $event)" /></label>
+        <label>Height (m) <input type="number" step="1" min="16" [value]="sel.maxN - sel.minN" (change)="setRect('height', $event)" /></label>
+      </div>
+      @if (areaKm(); as km) {
+        <p class="hint">{{ km.w | number: '1.2-2' }} km × {{ km.h | number: '1.2-2' }} km (LV95, south-west corner)</p>
+      }
+      @if (state.effectiveSpawn(); as sp) {
+        <div class="spawn-row">
+          <span class="spawn-label">Spawn point {{ state.spawn() ? '' : '(centre)' }}</span>
+          <div class="grid2">
+            <label>E <input type="number" step="1" [value]="sp.e" (change)="setSpawn('e', $event)" /></label>
+            <label>N <input type="number" step="1" [value]="sp.n" (change)="setSpawn('n', $event)" /></label>
+          </div>
+          <div class="row compact">
+            <button type="button" [class.active]="state.spawnMode()" (click)="state.spawnMode.set(!state.spawnMode())">
+              {{ state.spawnMode() ? 'Click on the map…' : 'Pick on map' }}
+            </button>
+            <button type="button" class="ghost" [disabled]="!state.spawn()" (click)="state.setSpawn(null)">Use centre</button>
+          </div>
+        </div>
+      }
+    } @else {
+      <p class="hint">Click <b>Select area</b> on the map, then click and drag a rectangle. Drag the corners to resize, drag the inside to move.</p>
+    }
+  </section>
+
+  <section>
+    <h2>2. Scale</h2>
+    <label>
+      Metres per block
+      <select [value]="settings().metresPerBlock" (change)="setScale($event)">
+        @for (s of scales; track s) {
+          <option [value]="s" [selected]="settings().metresPerBlock === s">{{ s }} m = 1 block</option>
+        }
+        @if (!scales.includes(settings().metresPerBlock)) {
+          <option [value]="settings().metresPerBlock" selected>{{ settings().metresPerBlock }} m = 1 block</option>
+        }
+      </select>
+    </label>
+    <label>
+      Custom metres per block
+      <input type="number" min="0.5" step="0.5" [value]="settings().metresPerBlock" (change)="update('metresPerBlock', number($event) || 1)" />
+    </label>
+    <label>
+      Elevation data
+      <select [value]="settings().source" (change)="update('source', $any(text($event)))">
+        <option value="auto">Auto (swissALTI3D, country model at ≥ 25 m/block)</option>
+        <option value="swissAlti3d">swissALTI3D (download tiles)</option>
+        <option value="dhm200">Country model 200 m (no download)</option>
+        <option value="synthetic">Synthetic test terrain</option>
+      </select>
+    </label>
+    <label>
+      swissALTI3D resolution
+      <select [value]="settings().alti3dResolution" (change)="update('alti3dResolution', number($event))">
+        <option [value]="2" [selected]="settings().alti3dResolution === 2">2 m (about 2.5 MB per km²)</option>
+        <option [value]="0.5" [selected]="settings().alti3dResolution === 0.5">0.5 m (about 40 MB per km²)</option>
+      </select>
+    </label>
+  </section>
+
+  <section>
+    <h2>3. Terrain</h2>
+    <div class="grid2">
+      <label>
+        Vertical scale
+        <select [value]="settings().verticalScaleMode" (change)="update('verticalScaleMode', $any(text($event)))">
+          <option value="auto">Auto fit</option>
+          <option value="manual">Manual</option>
+        </select>
+      </label>
+      <label>
+        Blocks per metre
+        <input type="number" min="0.01" step="0.05" [value]="settings().verticalScale" [disabled]="settings().verticalScaleMode !== 'manual'" (change)="update('verticalScale', number($event) || 1)" />
+      </label>
+      <label>Base Y <input type="number" min="-63" max="300" step="1" [value]="settings().baseY" (change)="update('baseY', int($event))" /></label>
+      <label>Snow line (m) <input type="number" step="50" [value]="settings().snowLine" (change)="update('snowLine', number($event))" /></label>
+      <label>Stone above slope (°) <input type="number" min="0" max="90" step="1" [value]="settings().slopeStoneDegrees" (change)="update('slopeStoneDegrees', number($event))" /></label>
+      <label class="check">
+        <input type="checkbox" [checked]="settings().waterEnabled" (change)="update('waterEnabled', checked($event))" />
+        Flood below (m)
+        <input type="number" step="1" [value]="settings().waterLevel" [disabled]="!settings().waterEnabled" (change)="update('waterLevel', number($event))" />
+      </label>
+    </div>
+    <label class="check">
+      <input type="checkbox" [checked]="settings().waterBodies" (change)="update('waterBodies', checked($event))" />
+      Lakes and rivers as water (swisstopo VECTOR25 water surfaces)
+    </label>
+    <label class="check">
+      <input type="checkbox" [checked]="settings().trees" (change)="update('trees', checked($event))" />
+      Trees in forests (oak below 1300 m, spruce above, none above the 2100 m tree line)
+    </label>
+    <label class="check">
+      <input type="checkbox" [checked]="settings().vegetation" (change)="update('vegetation', checked($event))" />
+      Grass, ferns and flowers on grass blocks
+    </label>
+    <label class="check">
+      <input type="checkbox" [checked]="settings().resources" (change)="update('resources', checked($event))" />
+      Resources: ores at vanilla depths, bee nests on some oaks, sweet berries and mushrooms in forests, pumpkins, clay and seagrass under water
+    </label>
+  </section>
+
+  <section>
+    <h2>4. Output</h2>
+    <label>World name <input type="text" [value]="settings().worldName" (change)="update('worldName', text($event))" /></label>
+    <label>
+      Output
+      <select [value]="settings().outputMode" (change)="update('outputMode', $any(text($event)))">
+        <option value="folder">Write into Minecraft saves folder</option>
+        <option value="zip">Download as zip</option>
+      </select>
+    </label>
+    @if (settings().outputMode === 'folder') {
+      <label>Saves folder <input type="text" [value]="settings().savesDir" (change)="update('savesDir', text($event))" spellcheck="false" /></label>
+      @if (state.defaults(); as d) {
+        @if (!d.savesDirExists && settings().savesDir === (d.savesDir ?? '')) {
+          <p class="warn">This folder does not exist yet. Start Minecraft once, or pick another folder.</p>
+        }
+      }
+      <label class="check">
+        <input type="checkbox" [checked]="settings().replaceExisting" (change)="update('replaceExisting', checked($event))" />
+        Replace an existing world of the same name (deletes it first)
+      </label>
+    }
+  </section>
+
+  <section class="estimate">
+    <h2>Estimate</h2>
+    @if (!selection()) {
+      <p class="hint">Select an area first.</p>
+    } @else if (estimate(); as est) {
+      <table>
+        <tr><td>Blocks</td><td>{{ est.blocksWide | number }} × {{ est.blocksHigh | number }} = {{ est.blocks | number }}</td></tr>
+        <tr><td>Chunks / regions</td><td>{{ est.chunks | number }} / {{ est.regions | number }}</td></tr>
+        <tr><td>Source</td><td>{{ sourceLabel() }}</td></tr>
+        @if (est.tiles > 0) {
+          <tr><td>Tiles to fetch</td><td>{{ est.tiles }} (≈ {{ mb(est.downloadBytes) }}, cached after the first run)</td></tr>
+        }
+        <tr><td>World size</td><td>≈ {{ mb(est.outputBytes) }}</td></tr>
+        @if (est.elevationMin !== null) {
+          <tr><td>Elevation</td><td>{{ est.elevationMin | number }} – {{ est.elevationMax | number }} m</td></tr>
+          <tr><td>Vertical scale</td><td>{{ est.verticalScale | number: '1.0-3' }} blocks / m</td></tr>
+        }
+      </table>
+      @for (w of est.warnings; track w) {
+        <p class="warn">{{ w }}</p>
+      }
+      @if (est.trueProportionMetresPerBlock; as tp) {
+        <button type="button" class="fix" (click)="update('metresPerBlock', tp)">
+          Use {{ tp }} m per block for true proportions
+        </button>
+      }
+    } @else if (state.estimateError(); as err) {
+      <p class="warn">{{ err }}</p>
+    } @else {
+      <p class="hint">Estimating…</p>
+    }
+  </section>
+
+  <section class="actions">
+    @if (!state.jobActive()) {
+      <button type="button" class="primary" [disabled]="!state.canGenerate()" (click)="generate()">Generate world</button>
+    } @else {
+      <button type="button" class="danger" (click)="cancel()">Cancel</button>
+    }
+    @if (state.jobError(); as err) {
+      <p class="warn">{{ err }}</p>
+    }
+  </section>
+
+  @if (job(); as j) {
+    <section class="job">
+      <h2>
+        {{ j.worldName }}
+        <span class="state" [class]="'state ' + j.state">{{ j.state }}</span>
+      </h2>
+      <div class="bar"><div class="fill" [style.width.%]="progressPercent()"></div></div>
+      <p class="phase">{{ j.progress.phase }} · {{ j.progress.message }}</p>
+      @if (j.result; as r) {
+        <table>
+          <tr><td>Folder</td><td class="path">{{ r.outputDir }}</td></tr>
+          <tr><td>Elevation</td><td>{{ r.minElevation | number: '1.0-0' }} – {{ r.maxElevation | number: '1.0-0' }} m → Y {{ r.minY }} – {{ r.maxY }}</td></tr>
+          <tr><td>Vertical scale</td><td>{{ r.verticalScale | number: '1.0-3' }}</td></tr>
+          <tr><td>Spawn block</td><td>X {{ r.spawnX }}, Y {{ r.spawnY }}, Z {{ r.spawnZ }}</td></tr>
+          @if (r.waterCells > 0) {
+            <tr><td>Water</td><td>{{ r.waterCells | number }} columns</td></tr>
+          }
+          @if (r.treeCount > 0) {
+            <tr><td>Trees</td><td>{{ r.treeCount | number }}</td></tr>
+          }
+          <tr><td>Chunks</td><td>{{ r.chunks | number }} in {{ r.regions }} region file(s)</td></tr>
+        </table>
+        <div class="row">
+          @if (j.downloadUrl) {
+            <a class="button primary" [href]="j.downloadUrl">Download zip</a>
+          } @else {
+            <button type="button" (click)="reveal()">Open folder</button>
+          }
+          <button type="button" class="ghost" (click)="dismissJob()">Dismiss</button>
+        </div>
+        @if (!r.wroteLevelDat) {
+          <p class="hint">An existing level.dat was kept; only region files were written.</p>
+        }
+        <p class="hint">Open Minecraft Java {{ state.defaults()?.minecraftVersion }} → Singleplayer → the world appears in the list. Quit Minecraft before regenerating a world it has open.</p>
+      } @else if (j.state === 'failed' || j.state === 'cancelled') {
+        <p class="warn">{{ j.error ?? j.progress.message }}</p>
+        <button type="button" class="ghost" (click)="dismissJob()">Dismiss</button>
+      }
+      <details>
+        <summary>Log ({{ j.log.length }})</summary>
+        <pre class="log">@for (line of logLines(); track $index) {<span class="line">{{ line }}</span>}</pre>
+      </details>
+    </section>
+  }
+
+  <footer>
+    @if (state.defaults(); as d) {
+      <p>{{ d.attribution }}</p>
+      <p>Cache: {{ mb(d.cacheBytes) }} in {{ d.cacheDir }} <button type="button" class="link" (click)="clearCache()">clear tiles</button></p>
+    }
+  </footer>
+</div>

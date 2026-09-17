@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MinecraftTopo.Core\MinecraftTopo.Core.csproj" />
+  </ItemGroup>
+
+  <!-- On publish, bundle the built Angular client as wwwroot so the published folder is self-contained. -->
+  <ItemGroup>
+    <ClientDist Include="..\..\client\dist\client\browser\**\*" />
+  </ItemGroup>
+  <Target Name="CopyClientDist" AfterTargets="Publish" Condition="Exists('..\..\client\dist\client\browser\index.html')">
+    <Copy SourceFiles="@(ClientDist)" DestinationFiles="@(ClientDist->'$(PublishDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Message Importance="high" Text="Copied Angular client into $(PublishDir)wwwroot" />
+  </Target>
+
+</Project>

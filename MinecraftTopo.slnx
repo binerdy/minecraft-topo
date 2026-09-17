@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MinecraftTopo.Cli/MinecraftTopo.Cli.csproj" />
+    <Project Path="src/MinecraftTopo.Core/MinecraftTopo.Core.csproj" />
+    <Project Path="src/MinecraftTopo.Server/MinecraftTopo.Server.csproj" />
+  </Folder>
+</Solution>

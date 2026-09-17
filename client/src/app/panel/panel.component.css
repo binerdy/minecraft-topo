@@ -1,0 +1,261 @@
+:host {
+  display: block;
+  height: 100%;
+  overflow-y: auto;
+  background: #f4f4f2;
+  border-left: 1px solid #ccc;
+  font-size: 13px;
+}
+
+.panel {
+  padding: 12px 14px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+section h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #555;
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+  color: #333;
+}
+
+label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+label.check input[type='number'] {
+  width: 90px;
+}
+
+input[type='text'],
+input[type='number'],
+select {
+  font: inherit;
+  padding: 5px 6px;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  background: #fff;
+  min-width: 0;
+}
+
+input:disabled {
+  background: #eee;
+  color: #888;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 10px;
+}
+
+.hint {
+  color: #666;
+  margin: 4px 0;
+  line-height: 1.4;
+}
+
+.warn {
+  color: #9a3b00;
+  background: #fff1e5;
+  border: 1px solid #ffc999;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 6px 0;
+  line-height: 1.4;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+td {
+  padding: 3px 4px;
+  vertical-align: top;
+  border-bottom: 1px solid #e4e4e0;
+}
+
+td:first-child {
+  color: #666;
+  white-space: nowrap;
+  width: 38%;
+}
+
+td.path {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+button,
+a.button {
+  font: inherit;
+  padding: 8px 12px;
+  border: 1px solid #888;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  text-decoration: none;
+  color: #222;
+  display: inline-block;
+}
+
+button.primary,
+a.button.primary {
+  background: #2e7d32;
+  border-color: #256628;
+  color: #fff;
+  width: 100%;
+  text-align: center;
+  font-weight: 600;
+}
+
+button.primary:disabled {
+  background: #9bbf9d;
+  border-color: #9bbf9d;
+  cursor: not-allowed;
+}
+
+button.danger {
+  background: #c62828;
+  border-color: #a31f1f;
+  color: #fff;
+  width: 100%;
+}
+
+button.ghost {
+  background: transparent;
+}
+
+button.fix {
+  width: 100%;
+  background: #fff8e1;
+  border-color: #e0a800;
+  margin: 2px 0 8px;
+}
+
+button.link {
+  border: none;
+  background: none;
+  color: #1a5fb4;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.row.compact {
+  margin: 2px 0 6px;
+}
+
+.row.compact button {
+  padding: 5px 10px;
+}
+
+.row.compact button.active {
+  background: #d32f2f;
+  color: #fff;
+  border-color: #a52020;
+}
+
+.spawn-row {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #ccc;
+}
+
+.spawn-label {
+  display: block;
+  color: #555;
+  margin-bottom: 4px;
+}
+
+.job .state {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: #ddd;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.job .state.running {
+  background: #ffe082;
+}
+
+.job .state.done {
+  background: #a5d6a7;
+}
+
+.job .state.failed,
+.job .state.cancelled {
+  background: #ef9a9a;
+}
+
+.bar {
+  height: 10px;
+  background: #ddd;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.bar .fill {
+  height: 100%;
+  background: #2e7d32;
+  transition: width 0.2s;
+}
+
+.phase {
+  margin: 6px 0;
+  color: #444;
+}
+
+.log .line {
+  display: block;
+}
+
+.log {
+  font: 11px/1.4 ui-monospace, Consolas, monospace;
+  background: #222;
+  color: #ddd;
+  padding: 8px;
+  border-radius: 4px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  margin: 6px 0 0;
+}
+
+footer {
+  color: #777;
+  font-size: 11px;
+  border-top: 1px solid #ddd;
+  padding-top: 8px;
+}
+
+footer p {
+  margin: 4px 0;
+  word-break: break-all;
+}

@@ -1,0 +1,27 @@
+<header class="topbar">
+  <div class="brand">
+    <span class="logo"></span>
+    <h1>Minecraft Topo</h1>
+    <span class="sub">Switzerland → Minecraft Java {{ state.defaults()?.minecraftVersion ?? '26.3' }}</span>
+  </div>
+  <div class="status">
+    @if (state.backendError(); as err) {
+      <span class="err">{{ err }}</span>
+    } @else if (state.overview(); as ov) {
+      @if (ov.ready) {
+        <span class="ok">Country model ready</span>
+      } @else if (ov.phase === 'error') {
+        <span class="err">Country model failed: {{ ov.message }}</span>
+      } @else {
+        <span class="busy">{{ ov.message }} {{ ov.percent > 0 ? (ov.percent | number: '1.0-0') + '%' : '' }}</span>
+      }
+    } @else {
+      <span class="busy">Connecting…</span>
+    }
+  </div>
+</header>
+
+<main class="layout">
+  <app-map class="map" />
+  <app-panel class="panel" />
+</main>
