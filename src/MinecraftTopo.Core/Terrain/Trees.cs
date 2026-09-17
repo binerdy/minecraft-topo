@@ -47,7 +47,23 @@ public static class TreePlanner
     /// <summary>Above this elevation (m) no trees grow (Swiss tree line is about 2000-2200 m).</summary>
     public const double TreeLine = 2100;
 
-    public static TreeMap Plan(HeightGrid grid, ClassifiedTerrain terrain, bool[] forest, double metresPerBlock, long seed)
+    /// <summary>Adds individually mapped trees (oak) on free grass cells.</summary>
+    public static void AddSingleTrees(ClassifiedTerrain terrain, List<(int X, int Z)> trees, HeightGrid grid, long seed)
+    {
+        int w = terrain.Width, h = terrain.Height;
+        foreach (var (x, z) in trees)
+        {
+            if (x < 2 || z < 2 || x >= w - 2 || z >= h - 2) continue;
+            int i = z * w + x;
+            if (terrain.Kind[i] != Surface.Grass || terrain.IsOccupied(i)) continue;
+            uint hash = Hash(x, z, seed ^ 0x51E);
+            bool spruce = grid.Data[i] > 1300;
+            byte height = spruce ? (byte)(6 + (hash >> 20) % 4) : (byte)(4 + (hash >> 20) % 3);
+            terrain.Trees.Add(new Tree(x, z, spruce ? TreeType.Spruce : TreeType.Oak, height));
+        }
+    }
+
+    public static TreeMap Plan(HeightGrid grid, ClassifiedTerrain terrain, bool[] forest, double metresPerBlock, long seed, byte[]? coverClass = null)
     {
         var map = new TreeMap();
 
@@ -64,16 +80,21 @@ public static class TreePlanner
                 int z = gz + (int)((hash >> 8) % (uint)spacing);
                 if (x >= w || z >= h) continue;
                 int i = z * w + x;
-                if (!forest[i] || terrain.Kind[i] != Surface.Grass) continue;
+                bool orchard = coverClass is not null && coverClass[i] == (byte)Water.CoverClass.Orchard;
+                if ((!forest[i] && !orchard) || terrain.Kind[i] != Surface.Grass) continue;
+                // orchards: neat rows, one tree per 8 m in each direction
+                if (orchard && !forest[i] && (gx % Math.Max(8 / (int)Math.Max(1, metresPerBlock), 1) != 0 || gz % Math.Max(8 / (int)Math.Max(1, metresPerBlock), 1) != 0)) continue;
                 float elev = grid.Data[i];
                 if (elev >= TreeLine) continue;
                 // Keep a 1-block margin to the grid edge so canopies stay inside the world.
                 if (x < 2 || z < 2 || x >= w - 2 || z >= h - 2) continue;
+                // No trunks on or right next to roads, rails and buildings.
+                if (terrain.IsOccupied(i) || terrain.IsOccupied(i - 1) || terrain.IsOccupied(i + 1) || terrain.IsOccupied(i - w) || terrain.IsOccupied(i + w)) continue;
 
-                bool spruce = elev > 1300 || (hash >> 16) % 3 == 0;
-                byte height = spruce
-                    ? (byte)(6 + (hash >> 20) % 4)   // 6..9
-                    : (byte)(4 + (hash >> 20) % 3);  // 4..6
+                bool spruce = !orchard && (elev > 1300 || (hash >> 16) % 3 == 0);
+                byte height = orchard ? (byte)4
+                    : spruce ? (byte)(6 + (hash >> 20) % 4)   // 6..9
+                    : (byte)(4 + (hash >> 20) % 3);           // 4..6
                 map.Add(new Tree(x, z, spruce ? TreeType.Spruce : TreeType.Oak, height));
             }
         }

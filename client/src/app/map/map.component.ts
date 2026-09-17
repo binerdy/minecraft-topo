@@ -13,6 +13,7 @@ import {
 import * as L from 'leaflet';
 import { ApiService } from '../api/api.service';
 import { Lv95Point, Lv95Rect, lv95ToWgs84, rectCorners, rectFromCorners, wgs84ToLv95 } from '../geo/lv95';
+import { RegionInfo } from '../api/models';
 import { AppState } from '../state/app-state.service';
 
 const SWITZERLAND_BOUNDS = L.latLngBounds([45.78, 5.9], [47.85, 10.55]);
@@ -24,7 +25,7 @@ const WMTS = 'https://wmts.geo.admin.ch/1.0.0/{layer}/default/current/3857/{z}/{
   selector: 'app-map',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div #map class="map" [class.drawing]="state.drawMode()" [class.spawning]="state.spawnMode()"></div>
+    <div #map class="map" [class.drawing]="state.drawMode()" [class.spawning]="state.spawnMode()" [class.regioning]="state.regionMode()"></div>
 
     <div class="map-tools">
       <button
@@ -36,6 +37,28 @@ const WMTS = 'https://wmts.geo.admin.ch/1.0.0/{layer}/default/current/3857/{z}/{
       >
         {{ state.drawMode() ? 'Drawing… click and drag' : state.selection() ? 'Draw new area' : 'Select area' }}
       </button>
+      <div class="region-row">
+        <button
+          type="button"
+          class="region"
+          [class.active]="state.regionMode()"
+          (click)="toggleRegion()"
+          title="Click on the map to select a whole municipality, district or canton (its bounding box becomes the area)"
+        >
+          {{ state.regionMode() ? (state.regionBusy() ? 'Looking up…' : 'Click on the map…') : 'Select region by click' }}
+        </button>
+        <select [value]="state.regionLevel()" (change)="state.regionLevel.set($any($event.target).value)" title="Which kind of region a click selects">
+          <option value="municipality">Municipality</option>
+          <option value="district">District</option>
+          <option value="canton">Canton</option>
+        </select>
+      </div>
+      @if (state.regionError(); as err) {
+        <span class="region-error">{{ err }}</span>
+      }
+      @if (state.region(); as r) {
+        <span class="region-name">{{ r.level }} <b>{{ r.name }}</b>, {{ r.areaKm2 | number: '1.0-0' }} km²</span>
+      }
       @if (state.selection()) {
         <button
           type="button"
@@ -65,6 +88,10 @@ const WMTS = 'https://wmts.geo.admin.ch/1.0.0/{layer}/default/current/3857/{z}/{
       <label class="layer">
         <input type="checkbox" [checked]="showShade()" (change)="toggleShade($any($event.target).checked)" />
         Hillshade
+      </label>
+      <label class="layer">
+        <input type="checkbox" [checked]="showRoads()" (change)="toggleRoads($any($event.target).checked)" />
+        Roads on the overview
       </label>
     </div>
 
@@ -131,6 +158,37 @@ const WMTS = 'https://wmts.geo.admin.ch/1.0.0/{layer}/default/current/3857/{z}/{
     .map.spawning {
       cursor: crosshair;
     }
+    .map.regioning {
+      cursor: crosshair;
+    }
+    .map-tools .region-row {
+      display: flex;
+      gap: 4px;
+    }
+    .map-tools .region-row button {
+      flex: 1;
+    }
+    .map-tools .region-row select {
+      font: inherit;
+      border: 1px solid #888;
+      border-radius: 4px;
+      background: #fff;
+    }
+    .map-tools button.region.active {
+      background: #1976d2;
+      color: #fff;
+      border-color: #125ea8;
+    }
+    .map-tools .region-error {
+      color: #b00020;
+      max-width: 260px;
+      line-height: 1.3;
+    }
+    .map-tools .region-name {
+      color: #333;
+      max-width: 260px;
+      line-height: 1.3;
+    }
     .map-tools .layer {
       display: flex;
       align-items: center;
@@ -164,12 +222,14 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   readonly showMap = signal(false);
   readonly mapOpacity = signal(0.6);
   readonly showShade = signal(false);
+  readonly showRoads = signal(false);
 
   private map!: L.Map;
   private overviewLayer!: L.TileLayer;
   private mapLayer!: L.TileLayer;
   private shadeLayer!: L.TileLayer;
   private polygon: L.Polygon | null = null;
+  private regionOutline: L.Polygon | null = null;
   private handles: L.Marker[] = [];
   private spawnMarker: L.Marker | null = null;
   private drawStart: Lv95Point | null = null;
@@ -184,13 +244,29 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     });
     effect(() => {
       const drawing = this.state.drawMode();
-      if (drawing) this.state.spawnMode.set(false);
+      if (drawing) {
+        this.state.spawnMode.set(false);
+        this.state.regionMode.set(false);
+      }
       if (!this.map) return;
       if (drawing) this.map.dragging.disable();
       else if (!this.moveStart) this.map.dragging.enable();
     });
     effect(() => {
-      if (this.state.spawnMode()) this.state.drawMode.set(false);
+      if (this.state.spawnMode()) {
+        this.state.drawMode.set(false);
+        this.state.regionMode.set(false);
+      }
+    });
+    effect(() => {
+      if (this.state.regionMode()) {
+        this.state.drawMode.set(false);
+        this.state.spawnMode.set(false);
+      }
+    });
+    effect(() => {
+      const r = this.state.region();
+      if (this.map) this.renderRegion(r);
     });
     effect(() => {
       const sp = this.state.effectiveSpawn();
@@ -233,6 +309,12 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     this.map.on('mouseup', (ev: L.LeafletMouseEvent) => this.onMouseUp(ev));
     this.map.on('mouseout', () => this.state.cursor.set(null));
     this.map.on('click', (ev: L.LeafletMouseEvent) => {
+      if (this.state.regionMode()) {
+        if (this.state.regionBusy()) return;
+        const rp = this.toLv95(ev.latlng);
+        void this.state.pickRegion(rp.e, rp.n);
+        return;
+      }
       if (!this.state.spawnMode()) return;
       const sel = this.state.selection();
       const p = this.toLv95(ev.latlng);
@@ -242,7 +324,10 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       }
     });
     this.map.getContainer().addEventListener('keydown', (ev) => {
-      if (ev.key === 'Escape' && this.state.drawMode()) this.state.drawMode.set(false);
+      if (ev.key === 'Escape') {
+        this.state.drawMode.set(false);
+        this.state.regionMode.set(false);
+      }
     });
     // Focus changes can scroll an overflow-hidden container; keep the map pinned.
     const container = this.map.getContainer();
@@ -275,6 +360,34 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     this.state.spawnMode.update((v) => !v);
   }
 
+  toggleRegion(): void {
+    this.state.regionError.set(null);
+    this.state.regionMode.update((v) => !v);
+  }
+
+  /** Dashed outline of the selected municipality, district or canton (the area is its bounding box). */
+  private renderRegion(r: RegionInfo | null): void {
+    this.regionOutline?.remove();
+    this.regionOutline = null;
+    if (!r) return;
+    const rings = r.outline.map((ring) =>
+      ring.map(([e, n]) => {
+        const ll = lv95ToWgs84(e, n);
+        return L.latLng(ll.lat, ll.lon);
+      }),
+    );
+    this.regionOutline = L.polygon(rings, {
+      color: '#1976d2',
+      weight: 2,
+      dashArray: '6 4',
+      fill: true,
+      fillColor: '#1976d2',
+      fillOpacity: 0.08,
+      interactive: false,
+    }).addTo(this.map);
+    this.map.fitBounds(this.regionOutline.getBounds(), { padding: [40, 40] });
+  }
+
   zoomToSelection(): void {
     const sel = this.state.selection();
     if (!sel) return;
@@ -297,6 +410,12 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     if (on) this.shadeLayer.addTo(this.map);
     else this.shadeLayer.remove();
   }
+
+  toggleRoads(on: boolean): void {
+    this.showRoads.set(on);
+    this.overviewLayer.setUrl(on ? OVERVIEW_URL + '&roads=true' : OVERVIEW_URL);
+  }
+
 
   // ---- mouse handling -----------------------------------------------------------------------
 

@@ -1,0 +1,5 @@
+releases: swisstlm3d_2020-03, swisstlm3d_2021-04, swisstlm3d_2022-03, swisstlm3d_2023-03, swisstlm3d_2024-03, swisstlm3d_2025-03, swisstlm3d_2026-02
+swisstlm3d_2026-02_2056_5728.gdb.zip https://data.geo.admin.ch/ch.swisstopo.swisstlm3d/swisstlm3d_2026-02/swisstlm3d_2026-02_2056_5728.gdb.zip
+swisstlm3d_2026-02_2056_5728.gpkg.zip https://data.geo.admin.ch/ch.swisstopo.swisstlm3d/swisstlm3d_2026-02/swisstlm3d_2026-02_2056_5728.gpkg.zip
+swisstlm3d_2026-02_2056_5728.shp.zip https://data.geo.admin.ch/ch.swisstopo.swisstlm3d/swisstlm3d_2026-02/swisstlm3d_2026-02_2056_5728.shp.zip
+swisstlm3d_2026-02_2056_5728.xtf.zip https://data.geo.admin.ch/ch.swisstopo.swisstlm3d/swisstlm3d_2026-02/swisstlm3d_2026-02_2056_5728.xtf.zip

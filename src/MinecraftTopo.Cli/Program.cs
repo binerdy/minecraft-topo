@@ -26,6 +26,7 @@ http.Timeout = TimeSpan.FromMinutes(10);
 var paths = new AppPaths(opts.GetValueOrDefault("cache"));
 var downloader = new Downloader(http);
 var dhm = new Dhm200Model(downloader, paths);
+var tlm = new MinecraftTopo.Core.Tlm.TlmDatasets(downloader, paths);
 var progress = new Progress<ProgressInfo>(p => Console.WriteLine($"  [{p.Phase}] {p.Percent,5:0.0}%  {p.Message}"));
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -36,16 +37,41 @@ try
     {
         return VerifyRegion(mcaPath!, opts.GetValueOrDefault("chunk"));
     }
+    if (opts.ContainsKey("list-blocks"))
+    {
+        foreach (var group in MinecraftTopo.Core.Anvil.BlockRoles.All.GroupBy(r => r.Group))
+        {
+            Console.WriteLine(group.Key);
+            foreach (var r in group) Console.WriteLine($"  {r.Key,-16} {r.Default,-22} {r.Label}");
+        }
+        Console.WriteLine($"\nChoices ({MinecraftTopo.Core.Anvil.BlockRoles.Choices.Count}): {string.Join(", ", MinecraftTopo.Core.Anvil.BlockRoles.Choices)}");
+        return 0;
+    }
 
     if (opts.TryGetValue("tile", out var tileSpec))
     {
         // --tile z,x,y --png out.png
         var parts = tileSpec!.Split(',');
         var renderer = new OverviewTileRenderer(dhm, paths, downloader);
-        var png = await renderer.GetTileAsync(int.Parse(parts[0]), int.Parse(parts[1]), int.Parse(parts[2]), cts.Token);
+        var png = await renderer.GetTileAsync(int.Parse(parts[0]), int.Parse(parts[1]), int.Parse(parts[2]), cts.Token, opts.ContainsKey("roads"));
         string outPng = opts.GetValueOrDefault("png") ?? $"tile_{tileSpec.Replace(',', '_')}.png";
         await File.WriteAllBytesAsync(outPng, png, cts.Token);
         Console.WriteLine($"Wrote {outPng} ({png.Length} bytes)");
+        return 0;
+    }
+
+    if (opts.TryGetValue("map", out var worldDir))
+    {
+        // --map <world folder> [--png out.png]: top-down image of the generated world, one pixel per block.
+        string outPng = opts.GetValueOrDefault("png") ?? "worldmap.png";
+        (int, int, int, int)? crop = null;
+        if (opts.GetValueOrDefault("crop") is { } cropSpec)
+        {
+            var c = cropSpec.Split(',').Select(int.Parse).ToArray();
+            crop = (c[0], c[1], c[2], c[3]);
+        }
+        WorldMap.Render(worldDir!, outPng, crop, (int)ParseDouble(opts.GetValueOrDefault("scale"), 1));
+        Console.WriteLine($"Wrote {outPng}");
         return 0;
     }
 
@@ -83,6 +109,9 @@ try
         Source = sourceKind,
         Alti3dResolution = ParseDouble(opts.GetValueOrDefault("res"), 2),
         ReplaceExisting = opts.ContainsKey("overwrite") || opts.ContainsKey("replace"),
+        BuildingModel = (opts.GetValueOrDefault("building-model") ?? "swisstopo").ToLowerInvariant() is "osm" or "footprints" ? BuildingModelKind.Footprints : BuildingModelKind.SwissBuildings3d,
+        LandCover = (opts.GetValueOrDefault("cover") ?? "tlm3d").ToLowerInvariant() switch { "tlm3d" => LandCoverKind.Tlm3d, "regio" or "tlmregio" => LandCoverKind.TlmRegio, _ => LandCoverKind.Vec25 },
+        Blocks = ParseBlocks(opts.GetValueOrDefault("blocks")),
         Spawn = opts.TryGetValue("spawn", out var spawnSpec) && spawnSpec is not null ? ParsePoint(spawnSpec) : null,
         Terrain = new TerrainOptions
         {
@@ -93,6 +122,13 @@ try
             Trees = !opts.ContainsKey("no-trees"),
             Vegetation = !opts.ContainsKey("no-vegetation"),
             Resources = !opts.ContainsKey("no-resources"),
+            Roads = opts.ContainsKey("roads"),
+            Rails = opts.ContainsKey("rails"),
+            Buildings = opts.ContainsKey("buildings"),
+            PowerLines = opts.ContainsKey("power"),
+            Villagers = opts.ContainsKey("villagers"),
+            StreetSigns = opts.ContainsKey("signs"),
+            Geology = !opts.ContainsKey("no-geology"),
             SnowLine = ParseDouble(opts.GetValueOrDefault("snow"), 2500),
             SlopeStoneDegrees = ParseDouble(opts.GetValueOrDefault("slope"), 32),
         },
@@ -108,7 +144,12 @@ try
             ElevationSourceKind.Dhm200 => new Dhm200Source(dhm),
             _ => new SwissAlti3dSource(downloader, paths, r.Alti3dResolution),
         },
-        r => r.ResolveSource() == ElevationSourceKind.Synthetic ? null : new MinecraftTopo.Core.Water.Vec25LandCoverSource(downloader, paths));
+        r => r.ResolveSource() == ElevationSourceKind.Synthetic ? null
+            : r.LandCover == LandCoverKind.Tlm3d ? new MinecraftTopo.Core.Tlm.TlmLandCoverSource(tlm, MinecraftTopo.Core.Tlm.TlmKind.Tlm3d)
+            : r.LandCover == LandCoverKind.TlmRegio ? new MinecraftTopo.Core.Tlm.TlmLandCoverSource(tlm, MinecraftTopo.Core.Tlm.TlmKind.Regio)
+            : new MinecraftTopo.Core.Water.Vec25LandCoverSource(downloader, paths),
+        r => new MinecraftTopo.Core.Buildings.SwissBuildings3dSource(downloader, paths),
+        r => new MinecraftTopo.Core.Geology.Gk500Source(downloader, paths));
     var result = await generator.GenerateAsync(request, progress, cts.Token);
     Console.WriteLine();
     Console.WriteLine($"Done: {result.OutputDir}");
@@ -241,6 +282,18 @@ static Lv95Point ParsePoint(string spec)
 static double ParseDouble(string? s, double fallback) =>
     s is null ? fallback : double.Parse(s, CultureInfo.InvariantCulture);
 
+static Dictionary<string, string>? ParseBlocks(string? spec)
+{
+    if (string.IsNullOrWhiteSpace(spec)) return null;
+    var d = new Dictionary<string, string>();
+    foreach (var part in spec.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    {
+        int eq = part.IndexOf('=');
+        if (eq > 0) d[part[..eq].Trim()] = part[(eq + 1)..].Trim();
+    }
+    return d;
+}
+
 static Dictionary<string, string?> ParseArgs(string[] args)
 {
     var d = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
@@ -269,10 +322,15 @@ static void PrintHelp()
           --vscale auto|<n>       vertical scale (blocks per metre)
           --base-y <y>            default 0
           --water <m>             flood below this real elevation
+          --building-model swisstopo|footprints   building shapes: swissBUILDINGS3D 3.0 (default) or landscape-model footprints
+          --cover tlm3d|regio|vec25   land cover source: swissTLM3D (default), swissTLMRegio or the VECTOR25 map layer
+          --roads --rails --buildings --power --villagers --signs   landscape-model infrastructure (needs --cover tlm3d or regio)
           --no-lakes              do not place lakes and rivers from swisstopo water surfaces
           --no-trees              do not plant trees in swisstopo forest areas
           --no-vegetation         no grass, ferns and flowers on grass blocks
           --no-resources          no ores, bee nests, berries, mushrooms, pumpkins, clay or seagrass
+          --no-geology            plain stone instead of GK500 rock types underground
+          --blocks role=block,...  block choices, e.g. asphalt=black_concrete,geo8=calcite (--list-blocks shows roles)
           --snow <m>              snow line, default 2500
           --slope <deg>           stone above this slope, default 32
           --spawn e,n             spawn point in LV95 metres (default: centre of the area)

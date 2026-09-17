@@ -12,6 +12,24 @@ public enum ElevationSourceKind
     Synthetic,
 }
 
+public enum LandCoverKind
+{
+    /// <summary>swisstopo VECTOR25 primary surfaces via WMS (any area size).</summary>
+    Vec25,
+    /// <summary>swissTLM3D GeoPackage (official, detailed; 4.8 GB one-time download).</summary>
+    Tlm3d,
+    /// <summary>swissTLMRegio GeoPackage (official, 1:200 000; 160 MB one-time download).</summary>
+    TlmRegio,
+}
+
+public enum BuildingModelKind
+{
+    /// <summary>swissBUILDINGS3D 3.0: measured heights and real roof shapes (any land cover source).</summary>
+    SwissBuildings3d,
+    /// <summary>Footprints from the land cover source extruded by storeys.</summary>
+    Footprints,
+}
+
 /// <summary>Everything needed to generate one world.</summary>
 public sealed record GenerationRequest
 {
@@ -24,8 +42,15 @@ public sealed record GenerationRequest
     /// <summary>swissALTI3D resolution when that source is used: 2 or 0.5.</summary>
     public double Alti3dResolution { get; init; } = 2;
     public TerrainOptions Terrain { get; init; } = new();
+    /// <summary>Where water and forest outlines come from.</summary>
+    public LandCoverKind LandCover { get; init; } = LandCoverKind.Vec25;
+    /// <summary>Where building shapes come from when buildings are enabled.</summary>
+    public BuildingModelKind BuildingModel { get; init; } = BuildingModelKind.SwissBuildings3d;
     /// <summary>Delete an existing world of the same name before generating.</summary>
     public bool ReplaceExisting { get; init; }
+
+    /// <summary>Block role overrides (see <see cref="Anvil.BlockRoles"/>): role key -> vanilla block name.</summary>
+    public IReadOnlyDictionary<string, string>? Blocks { get; init; }
 
     /// <summary>World spawn in LV95 metres; null = centre of the area. Clamped into the area.</summary>
     public Lv95Point? Spawn { get; init; }

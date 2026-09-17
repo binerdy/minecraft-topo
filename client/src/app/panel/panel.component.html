@@ -1,4 +1,8 @@
 <div class="panel">
+  <div class="panel-head">
+    <span>Settings</span>
+    <button type="button" class="link" (click)="state.resetSettings()">Reset all settings</button>
+  </div>
   <section>
     <h2>1. Area</h2>
     @if (selection(); as sel) {
@@ -10,6 +14,9 @@
       </div>
       @if (areaKm(); as km) {
         <p class="hint">{{ km.w | number: '1.2-2' }} km × {{ km.h | number: '1.2-2' }} km (LV95, south-west corner)</p>
+      }
+      @if (state.region(); as r) {
+        <p class="hint">Bounding box of the {{ r.level }} <b>{{ r.name }}</b> ({{ r.areaKm2 | number: '1.0-0' }} km² inside its border).</p>
       }
       @if (state.effectiveSpawn(); as sp) {
         <div class="spawn-row">
@@ -27,7 +34,7 @@
         </div>
       }
     } @else {
-      <p class="hint">Click <b>Select area</b> on the map, then click and drag a rectangle. Drag the corners to resize, drag the inside to move.</p>
+      <p class="hint">Click <b>Select area</b> on the map, then click and drag a rectangle. Drag the corners to resize, drag the inside to move. Or click <b>Select region by click</b> and then a municipality, district or canton.</p>
     }
   </section>
 
@@ -89,18 +96,89 @@
         <input type="number" step="1" [value]="settings().waterLevel" [disabled]="!settings().waterEnabled" (change)="update('waterLevel', number($event))" />
       </label>
     </div>
+    <label>
+      Water and forest outlines from
+      <select [value]="settings().landCover" (change)="update('landCover', $any(text($event)))">
+        <option value="tlm3d">swissTLM3D (official, most detailed; 4.8 GB one-time download)</option>
+        <option value="tlmRegio">swissTLMRegio (official, 1:200 000; 160 MB one-time download)</option>
+        <option value="vec25">swisstopo VECTOR25 map layer (any area size, no download)</option>
+      </select>
+    </label>
+    @if (state.datasets(); as ds) {
+      @if (settings().landCover === 'tlm3d' || settings().landCover === 'tlmRegio') {
+        @let d = settings().landCover === 'tlm3d' ? ds.tlm3d : ds.tlmRegio;
+        @if (d.ready) {
+          <p class="hint">{{ d.name }} is downloaded and ready.</p>
+        } @else if (d.phase === 'tlm') {
+          <p class="note">{{ d.message }} ({{ d.percent | number: '1.0-0' }} %)</p>
+        } @else if (d.phase === 'error') {
+          <p class="warn">{{ d.name }} download failed: {{ d.message }} <button type="button" class="link" (click)="state.prepareDataset(settings().landCover === 'tlm3d' ? 'tlm3d' : 'regio')">retry</button></p>
+        } @else {
+          <p class="warn">
+            {{ d.name }} is not downloaded yet ({{ mb(d.approxBytes) }}, one time). It downloads automatically at the first generation, or
+            <button type="button" class="link" (click)="state.prepareDataset(settings().landCover === 'tlm3d' ? 'tlm3d' : 'regio')">download now</button>.
+          </p>
+        }
+      }
+    }
     <label class="check">
       <input type="checkbox" [checked]="settings().waterBodies" (change)="update('waterBodies', checked($event))" />
-      Lakes and rivers as water (swisstopo VECTOR25 water surfaces)
+      Lakes and rivers as water
     </label>
+    <ng-container *ngTemplateOutlet="blocks; context: { group: 'terrain', title: 'Terrain blocks' }" />
     <label class="check">
       <input type="checkbox" [checked]="settings().trees" (change)="update('trees', checked($event))" />
       Trees in forests (oak below 1300 m, spruce above, none above the 2100 m tree line)
     </label>
+    <ng-container *ngTemplateOutlet="blocks; context: { group: 'trees', title: 'Tree blocks' }" />
+    <label class="check">
+      <input type="checkbox" [checked]="settings().geology" (change)="update('geology', checked($event))" />
+      Rock types from the GK500 geological map (underground and on bare rock; plain stone when off)
+    </label>
+    <ng-container *ngTemplateOutlet="blocks; context: { group: 'geology', title: 'Rock type blocks' }" />
     <label class="check">
       <input type="checkbox" [checked]="settings().vegetation" (change)="update('vegetation', checked($event))" />
       Grass, ferns and flowers on grass blocks
     </label>
+    <label class="check">
+      <input type="checkbox" [checked]="settings().buildings" [disabled]="settings().buildingModel === 'footprints' && !infrastructureAvailable()" (change)="update('buildings', checked($event))" />
+      Buildings
+    </label>
+    <label>
+      Building shapes from
+      <select [value]="settings().buildingModel" (change)="update('buildingModel', $any(text($event)))">
+        <option value="swissBuildings3d">swissBUILDINGS3D 3.0 (measured heights and real roof shapes)</option>
+        <option value="footprints">Footprints from the land cover source (boxes by storeys)</option>
+      </select>
+    </label>
+    <p class="hint">Churches get stone walls and a slate roof when the land cover source knows them (swissTLM3D or swissTLMRegio); with footprint boxes they also get a tower.</p>
+    <ng-container *ngTemplateOutlet="blocks; context: { group: 'buildings', title: 'Building blocks' }" />
+    <div class="model-extras" [class.disabled]="!infrastructureAvailable()">
+      <span class="spawn-label">From the landscape model (swissTLM3D or swissTLMRegio)</span>
+      <label class="check">
+        <input type="checkbox" [checked]="settings().roads" [disabled]="!infrastructureAvailable()" (change)="update('roads', checked($event))" />
+        Roads (concrete by class with lane markings, dirt paths and gravel tracks, cobblestone where tagged)
+      </label>
+      <ng-container *ngTemplateOutlet="blocks; context: { group: 'roads', title: 'Road blocks' }" />
+      <label class="check">
+        <input type="checkbox" [checked]="settings().rails" [disabled]="!infrastructureAvailable()" (change)="update('rails', checked($event))" />
+        Railways (gravel bed with rails)
+      </label>
+      <ng-container *ngTemplateOutlet="blocks; context: { group: 'rails', title: 'Railway blocks' }" />
+      <label class="check">
+        <input type="checkbox" [checked]="settings().powerLines" [disabled]="!infrastructureAvailable()" (change)="update('powerLines', checked($event))" />
+        Power lines and wind turbines (iron pylons and wooden poles with chain wires, quartz turbines with rotors)
+      </label>
+      <ng-container *ngTemplateOutlet="blocks; context: { group: 'power', title: 'Power line blocks' }" />
+      <label class="check">
+        <input type="checkbox" [checked]="settings().villagers" [disabled]="!settings().buildings" (change)="update('villagers', checked($event))" />
+        Villagers next to houses (about one per house, none at industrial buildings; needs Buildings)
+      </label>
+      <label class="check">
+        <input type="checkbox" [checked]="settings().streetSigns" [disabled]="!infrastructureAvailable() || !settings().roads" (change)="update('streetSigns', checked($event))" />
+        Street name signs beside named roads, every 120 m (needs Roads)
+      </label>
+    </div>
     <label class="check">
       <input type="checkbox" [checked]="settings().resources" (change)="update('resources', checked($event))" />
       Resources: ores at vanilla depths, bee nests on some oaks, sweet berries and mushrooms in forests, pumpkins, clay and seagrass under water
@@ -152,10 +230,8 @@
       @for (w of est.warnings; track w) {
         <p class="warn">{{ w }}</p>
       }
-      @if (est.trueProportionMetresPerBlock; as tp) {
-        <button type="button" class="fix" (click)="update('metresPerBlock', tp)">
-          Use {{ tp }} m per block for true proportions
-        </button>
+      @if (state.scaleNotice(); as notice) {
+        <p class="note">{{ notice }}</p>
       }
     } @else if (state.estimateError(); as err) {
       <p class="warn">{{ err }}</p>
@@ -227,3 +303,32 @@
     }
   </footer>
 </div>
+
+<!-- Block choice list for one option group; rendered only while expanded (up to 23 selects with ~300 options each). -->
+<ng-template #blocks let-group="group" let-title="title">
+  @if (rolesFor(group).length > 0) {
+    <details class="blocks" [open]="isOpen(group)" (toggle)="setOpen(group, $any($event.target).open)">
+      <summary>
+        {{ title }}
+        @if (overrideCount(group); as n) {
+          <span class="badge">{{ n }} changed</span>
+        }
+      </summary>
+      @if (isOpen(group)) {
+        @for (r of rolesFor(group); track r.key) {
+          <label class="block-row">
+            <span>{{ r.label }}</span>
+            <select [value]="blockValue(r)" [class.changed]="blockValue(r) !== r.default" (change)="setBlock(r.key, text($event))">
+              @for (c of state.blockChoices(); track c) {
+                <option [value]="c" [selected]="c === blockValue(r)">{{ c }}{{ c === r.default ? ' (default)' : '' }}</option>
+              }
+            </select>
+          </label>
+        }
+        @if (overrideCount(group) > 0) {
+          <button type="button" class="link" (click)="resetGroup(group)">Use the default blocks for {{ title.toLowerCase() }}</button>
+        }
+      }
+    </details>
+  }
+</ng-template>

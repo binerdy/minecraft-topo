@@ -91,6 +91,9 @@ public sealed class JobManager : IDisposable
             Source = dto.Source,
             Alti3dResolution = dto.Alti3dResolution,
             ReplaceExisting = dto.ReplaceExisting,
+            LandCover = dto.LandCover,
+            BuildingModel = dto.BuildingModel,
+            Blocks = dto.Blocks,
             Spawn =dto.SpawnE is { } se && dto.SpawnN is { } sn ? new Lv95Point(se, sn) : null,
             Terrain = new TerrainOptions
             {
@@ -101,6 +104,13 @@ public sealed class JobManager : IDisposable
                 Trees = dto.Trees,
                 Vegetation = dto.Vegetation,
                 Resources = dto.Resources,
+                Roads = dto.Roads,
+                Rails = dto.Rails,
+                Buildings = dto.Buildings,
+                PowerLines = dto.PowerLines,
+                Villagers = dto.Villagers,
+                StreetSigns = dto.StreetSigns,
+                Geology = dto.Geology,
                 SnowLine = dto.SnowLine,
                 SlopeStoneDegrees = dto.SlopeStoneDegrees,
             },

@@ -33,23 +33,27 @@ public sealed class OverviewTileRenderer
         _waterCacheDir = Path.Combine(paths.WaterCacheDir, "overview");
     }
 
+    public const string RoadsLayer = "ch.swisstopo.swisstlm3d-strassen";
+
     /// <summary>Returns PNG bytes for a tile, using the disk cache when possible.</summary>
-    public async Task<byte[]> GetTileAsync(int z, int x, int y, CancellationToken ct)
+    public async Task<byte[]> GetTileAsync(int z, int x, int y, CancellationToken ct, bool roads = false)
     {
         if (z < MinZoom || z > MaxZoom) throw new ArgumentOutOfRangeException(nameof(z));
         int n = 1 << z;
         if (x < 0 || y < 0 || x >= n || y >= n) throw new ArgumentOutOfRangeException(nameof(x));
 
-        string path = Path.Combine(_cacheDir, z.ToString(), x.ToString(), y + ".png");
+        string path = Path.Combine(_cacheDir, roads ? "roads" : "plain", z.ToString(), x.ToString(), y + ".png");
         if (File.Exists(path)) return await File.ReadAllBytesAsync(path, ct);
 
         var grid = await _model.GetAsync(null, ct);
         (bool[] Water, bool[] Forest)? cover = null;
+        bool[]? roadMask = null;
         if (TileIntersectsModel(z, x, y, grid))
         {
             cover = await TryGetLandCoverAsync(z, x, y, ct);
+            if (roads) roadMask = await TryGetRoadMaskAsync(z, x, y, ct);
         }
-        byte[] png = await Task.Run(() => Render(z, x, y, cover?.Water, cover?.Forest), ct);
+        byte[] png = await Task.Run(() => Render(z, x, y, cover?.Water, cover?.Forest, roadMask), ct);
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -105,13 +109,41 @@ public sealed class OverviewTileRenderer
         }
     }
 
+    /// <summary>Road pixels from the swisstopo TLM road layer (any drawn pixel counts), or null when unavailable.</summary>
+    private async Task<bool[]?> TryGetRoadMaskAsync(int z, int x, int y, CancellationToken ct)
+    {
+        const int size = WebMercator.TileSize;
+        double minX = WebMercator.TileXToLon(x, z) / 180.0 * MercatorHalf;
+        double maxX = WebMercator.TileXToLon(x + 1, z) / 180.0 * MercatorHalf;
+        double maxY = LatToMercatorY(WebMercator.TileYToLat(y, z));
+        double minY = LatToMercatorY(WebMercator.TileYToLat(y + 1, z));
+        string url = string.Create(CultureInfo.InvariantCulture,
+            $"{WaterWmsBase}&LAYERS={RoadsLayer}&BBOX={minX:0.###},{minY:0.###},{maxX:0.###},{maxY:0.###}&WIDTH={size}&HEIGHT={size}");
+        string file = Path.Combine(_waterCacheDir, "roads", z.ToString(), x.ToString(), y + ".png");
+        try
+        {
+            await _downloader.GetFileAsync(url, file, null, ct);
+            var img = PngReader.Decode(await File.ReadAllBytesAsync(file, ct));
+            if (img.Width != size || img.Height != size) return null;
+            var mask = new bool[size * size];
+            var px = img.Pixels;
+            for (int i = 0; i < mask.Length; i++) mask[i] = px[i * 4 + 3] >= 96;
+            return mask;
+        }
+        catch (Exception ex) when (ex is IOException or HttpRequestException or InvalidDataException or NotSupportedException)
+        {
+            try { if (File.Exists(file)) File.Delete(file); } catch (IOException) { }
+            return null;
+        }
+    }
+
     private static double LatToMercatorY(double lat)
     {
         double rad = lat * Math.PI / 180.0;
         return Math.Log(Math.Tan(Math.PI / 4 + rad / 2)) * MercatorHalf / Math.PI;
     }
 
-    public byte[] Render(int z, int x, int y, bool[]? water = null, bool[]? forest = null)
+    public byte[] Render(int z, int x, int y, bool[]? water = null, bool[]? forest = null, bool[]? roads = null)
     {
         const int size = WebMercator.TileSize;
         var grid = _model.Grid;
@@ -135,6 +167,11 @@ public sealed class OverviewTileRenderer
                 if (float.IsNaN(h)) continue;
 
                 int o = (py * size + px) * 4;
+                if (roads is not null && roads[py * size + px])
+                {
+                    rgba[o] = 70; rgba[o + 1] = 70; rgba[o + 2] = 70; rgba[o + 3] = 255; // asphalt
+                    continue;
+                }
                 if (water is not null && water[py * size + px])
                 {
                     rgba[o] = 63; rgba[o + 1] = 118; rgba[o + 2] = 228; rgba[o + 3] = 255; // Minecraft water

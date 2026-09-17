@@ -26,6 +26,18 @@ public sealed record JobRequestDto
     public bool Trees { get; init; } = true;
     public bool Vegetation { get; init; } = true;
     public bool Resources { get; init; } = true;
+    public LandCoverKind LandCover { get; init; } = LandCoverKind.Vec25;
+    public BuildingModelKind BuildingModel { get; init; } = BuildingModelKind.SwissBuildings3d;
+    public bool Roads { get; init; }
+    public bool Rails { get; init; }
+    public bool Buildings { get; init; }
+    public bool PowerLines { get; init; }
+    public bool Villagers { get; init; }
+    public bool StreetSigns { get; init; }
+    /// <summary>Underground rock types from the GK500 geological map.</summary>
+    public bool Geology { get; init; } = true;
+    /// <summary>Block role overrides: role key -> vanilla block name (see GET /api/blocks).</summary>
+    public Dictionary<string, string>? Blocks { get; init; }
     public double SnowLine { get; init; } = 2500;
     public double SlopeStoneDegrees { get; init; } = 32;
     public OutputMode OutputMode { get; init; } = OutputMode.Folder;

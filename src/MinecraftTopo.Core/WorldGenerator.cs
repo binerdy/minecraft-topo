@@ -14,12 +14,21 @@ public sealed class WorldGenerator
 
     private readonly Func<GenerationRequest, IElevationSource> _sourceFactory;
     private readonly Func<GenerationRequest, ILandCoverSource?> _coverFactory;
+    private readonly Func<GenerationRequest, Buildings.SwissBuildings3dSource?> _buildingFactory;
+    private readonly Func<GenerationRequest, Geology.Gk500Source?> _geologyFactory;
 
     /// <param name="coverFactory">Returns the land-cover (water, forest) source for a request, or null for none.</param>
-    public WorldGenerator(Func<GenerationRequest, IElevationSource> sourceFactory, Func<GenerationRequest, ILandCoverSource?>? coverFactory = null)
+    /// <param name="buildingFactory">Returns the measured building model source, or null when unavailable.</param>
+    /// <param name="geologyFactory">Returns the GK500 geology source, or null when unavailable.</param>
+    public WorldGenerator(Func<GenerationRequest, IElevationSource> sourceFactory,
+        Func<GenerationRequest, ILandCoverSource?>? coverFactory = null,
+        Func<GenerationRequest, Buildings.SwissBuildings3dSource?>? buildingFactory = null,
+        Func<GenerationRequest, Geology.Gk500Source?>? geologyFactory = null)
     {
         _sourceFactory = sourceFactory;
         _coverFactory = coverFactory ?? (_ => null);
+        _buildingFactory = buildingFactory ?? (_ => null);
+        _geologyFactory = geologyFactory ?? (_ => null);
     }
 
     public async Task<GenerationResult> GenerateAsync(GenerationRequest req, IProgress<ProgressInfo>? progress, CancellationToken ct)
@@ -40,20 +49,57 @@ public sealed class WorldGenerator
 
         // 3. Lakes, rivers and forests.
         LandCover? cover = null;
-        var coverSource = req.Terrain.WaterBodies || req.Terrain.Trees ? _coverFactory(req) : null;
+        var t = req.Terrain;
+        bool wantsInfrastructure = t.Roads || t.Rails || t.Buildings || t.PowerLines;
+        var coverSource = t.WaterBodies || t.Trees || wantsInfrastructure ? _coverFactory(req) : null;
         if (coverSource is not null)
         {
-            cover = await coverSource.GetAsync(grid, progress, ct);
+            if (wantsInfrastructure && !coverSource.SupportsInfrastructure)
+            {
+                progress?.Report(new ProgressInfo("landcover", 0, $"{coverSource.Name} has no roads, railways or buildings; switch the land cover to swissTLM3D or swissTLMRegio for those."));
+            }
+            var options = coverSource.SupportsInfrastructure ? new LandCoverOptions(t.Roads, t.Rails, t.Buildings, t.PowerLines, t.StreetSigns) : new LandCoverOptions();
+            cover = await coverSource.GetAsync(grid, options, progress, ct);
+        }
+
+        // 3b. Measured building model (swissBUILDINGS3D) replaces footprint box buildings when selected.
+        if (t.Buildings && req.BuildingModel == BuildingModelKind.SwissBuildings3d && req.ResolveSource() != ElevationSourceKind.Synthetic)
+        {
+            var buildingSource = _buildingFactory(req);
+            if (buildingSource is not null)
+            {
+                var model = await buildingSource.GetAsync(grid, progress, ct);
+                cover = (cover ?? LandCover.Empty(grid.Width * grid.Height)).WithBuildingModel(model);
+            }
+        }
+
+        // 3c. Rock types from the geological map.
+        byte[]? geology = null;
+        if (t.Geology && req.ResolveSource() != ElevationSourceKind.Synthetic && _geologyFactory(req) is { } geologySource)
+        {
+            geology = await geologySource.GetAsync(grid, progress, ct);
         }
 
         // 4. Classification.
         long seed = unchecked((long)0x4D43544F504F5F00L ^ req.WorldName.GetHashCode());
         progress?.Report(new ProgressInfo("classify", 0, "Classifying terrain"));
         var terrain = await Task.Run(() => SurfaceClassifier.Classify(grid, req.Terrain, req.MetresPerBlock, cover, seed, ct), ct);
+        terrain.Geology = geology;
+        terrain.Palette = BlockPalette.Create(req.Blocks, out var paletteWarnings);
+        foreach (var warning in paletteWarnings) progress?.Report(new ProgressInfo("classify", 0, warning));
+        if (terrain.Palette.Overrides.Count > 0)
+        {
+            string choices = string.Join(", ", terrain.Palette.Overrides.Select(kv => BlockRoles.Find(kv.Key)!.Label + " = " + kv.Value));
+            progress?.Report(new ProgressInfo("classify", 0, "Block choices: " + choices));
+        }
         progress?.Report(new ProgressInfo("classify", 100,
             $"Elevation {terrain.MinElevation:0} - {terrain.MaxElevation:0} m -> Y {terrain.MinY} - {terrain.MaxY}, vertical scale {terrain.VerticalScale:0.###}" +
             (terrain.WaterCells > 0 ? $", {terrain.WaterCells:N0} water columns" : "") +
-            (terrain.Trees.Count > 0 ? $", {terrain.Trees.Count:N0} trees" : "")));
+            (terrain.Trees.Count > 0 ? $", {terrain.Trees.Count:N0} trees" : "") +
+            (terrain.BuildingCount > 0 ? $", {terrain.BuildingCount:N0} buildings" : "") +
+            (terrain.Structures.Count > 0 ? $", {terrain.Structures.Count:N0} pylons/turbines" : "") +
+            (terrain.Villagers.Count > 0 ? $", {terrain.Villagers.Count:N0} villagers" : "") +
+            (terrain.Signs.Count > 0 ? $", {terrain.Signs.Count:N0} street signs" : "")));
 
         // 5. World folder + region files.
         string worldDir = req.OutputDir;
@@ -103,6 +149,13 @@ public sealed class WorldGenerator
                 region.Save(Path.Combine(regionDir, RegionFile.FileName(r.rx, r.rz)));
             });
         }, ct);
+
+        // 5b. Entities (villagers) live in their own region files.
+        if (terrain.Villagers.Count > 0)
+        {
+            progress?.Report(new ProgressInfo("write", 100, $"Writing {terrain.Villagers.Count:N0} villagers"));
+            EntityWriter.WriteVillagers(worldDir, terrain.Villagers, req.WorldName.GetHashCode());
+        }
 
         // 6. World-level files.
         var (spawnX, spawnZ) = req.SpawnBlock();

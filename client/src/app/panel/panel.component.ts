@@ -1,6 +1,7 @@
-import { DecimalPipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject } from '@angular/core';
+import { DecimalPipe, NgTemplateOutlet } from '@angular/common';
+import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, signal } from '@angular/core';
 import { ApiService } from '../api/api.service';
+import { BlockGroup, BlockRole } from '../api/models';
 import { Lv95Rect } from '../geo/lv95';
 import { AppState, Settings } from '../state/app-state.service';
 
@@ -9,7 +10,7 @@ const SCALES = [1, 2, 5, 10, 25, 50, 100];
 @Component({
   selector: 'app-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe],
+  imports: [DecimalPipe, NgTemplateOutlet],
   templateUrl: './panel.component.html',
   styleUrl: './panel.component.css',
 })
@@ -35,6 +36,8 @@ export class PanelComponent {
   readonly settings = this.state.settings;
   readonly estimate = this.state.estimate;
   readonly job = this.state.job;
+
+  readonly infrastructureAvailable = computed(() => this.settings().landCover !== 'vec25');
 
   readonly areaKm = computed(() => {
     const s = this.selection();
@@ -71,6 +74,39 @@ export class PanelComponent {
 
   update<K extends keyof Settings>(key: K, value: Settings[K]): void {
     this.state.updateSettings({ [key]: value } as Partial<Settings>);
+  }
+
+  // ---- block choices ---------------------------------------------------------------------------
+
+  private readonly openGroups = signal<Record<string, boolean>>({});
+
+  rolesFor(group: BlockGroup): BlockRole[] {
+    return this.state.blockRoles().filter((r) => r.group === group);
+  }
+
+  blockValue(role: BlockRole): string {
+    return this.settings().blocks[role.key] ?? role.default;
+  }
+
+  setBlock(key: string, block: string): void {
+    this.state.setBlock(key, block);
+  }
+
+  overrideCount(group: BlockGroup): number {
+    const blocks = this.settings().blocks;
+    return this.rolesFor(group).filter((r) => blocks[r.key] !== undefined).length;
+  }
+
+  resetGroup(group: BlockGroup): void {
+    for (const r of this.rolesFor(group)) this.state.setBlock(r.key, r.default);
+  }
+
+  isOpen(group: string): boolean {
+    return this.openGroups()[group] === true;
+  }
+
+  setOpen(group: string, open: boolean): void {
+    this.openGroups.update((g) => ({ ...g, [group]: open }));
   }
 
   number(ev: Event): number {

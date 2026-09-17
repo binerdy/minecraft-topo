@@ -28,6 +28,7 @@ public sealed class Vec25LandCoverSource : ILandCoverSource
     }
 
     public string Name => "swisstopo VECTOR25 primary surfaces";
+    public bool SupportsInfrastructure => false;
 
     /// <summary>
     /// VECTOR25 draws rivers in (82,209,255) and lakes in (187,252,255); every other class is
@@ -39,7 +40,7 @@ public sealed class Vec25LandCoverSource : ILandCoverSource
     /// <summary>Forest is light green (208,255,208); open forest / bushes use dotted greens such as (125,251,125).</summary>
     public static bool IsForest(byte r, byte g, byte b) => g >= 200 && g - r >= 40 && g - b >= 40 && r <= 215 && b <= 215;
 
-    public async Task<LandCover> GetAsync(HeightGrid grid, IProgress<ProgressInfo>? progress, CancellationToken ct)
+    public async Task<LandCover> GetAsync(HeightGrid grid, LandCoverOptions options, IProgress<ProgressInfo>? progress, CancellationToken ct)
     {
         var water = new bool[grid.Width * grid.Height];
         var forest = new bool[grid.Width * grid.Height];
@@ -99,7 +100,7 @@ public sealed class Vec25LandCoverSource : ILandCoverSource
             }
         }
 
-        var cover = new LandCover(water, forest);
+        var cover = new LandCover { Water = water, Forest = forest };
         progress?.Report(new ProgressInfo("landcover", 100, $"Water covers {cover.WaterCount:N0} and forest {cover.ForestCount:N0} of {water.Length:N0} cells"));
         return cover;
     }

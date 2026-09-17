@@ -37,12 +37,15 @@ builder.Services.AddSingleton(_ =>
 builder.Services.AddSingleton<AppPaths>(_ => new AppPaths(builder.Configuration["DataDir"]));
 builder.Services.AddSingleton<Downloader>();
 builder.Services.AddSingleton<Dhm200Model>();
+builder.Services.AddSingleton<MinecraftTopo.Core.Tlm.TlmDatasets>();
+builder.Services.AddSingleton<MinecraftTopo.Core.Tlm.RegionLookup>();
 builder.Services.AddSingleton<OverviewTileRenderer>();
 builder.Services.AddSingleton<WorldGenerator>(sp =>
 {
     var downloader = sp.GetRequiredService<Downloader>();
     var paths = sp.GetRequiredService<AppPaths>();
     var dhm = sp.GetRequiredService<Dhm200Model>();
+    var tlm = sp.GetRequiredService<MinecraftTopo.Core.Tlm.TlmDatasets>();
     return new WorldGenerator(
         req => req.ResolveSource() switch
         {
@@ -50,7 +53,12 @@ builder.Services.AddSingleton<WorldGenerator>(sp =>
             ElevationSourceKind.Dhm200 => new Dhm200Source(dhm),
             _ => new SwissAlti3dSource(downloader, paths, req.Alti3dResolution),
         },
-        req => req.ResolveSource() == ElevationSourceKind.Synthetic ? null : new MinecraftTopo.Core.Water.Vec25LandCoverSource(downloader, paths));
+        req => req.ResolveSource() == ElevationSourceKind.Synthetic ? null
+            : req.LandCover == LandCoverKind.Tlm3d ? new MinecraftTopo.Core.Tlm.TlmLandCoverSource(tlm, MinecraftTopo.Core.Tlm.TlmKind.Tlm3d)
+            : req.LandCover == LandCoverKind.TlmRegio ? new MinecraftTopo.Core.Tlm.TlmLandCoverSource(tlm, MinecraftTopo.Core.Tlm.TlmKind.Regio)
+            : new MinecraftTopo.Core.Water.Vec25LandCoverSource(downloader, paths),
+        req => new MinecraftTopo.Core.Buildings.SwissBuildings3dSource(downloader, paths),
+        req => new MinecraftTopo.Core.Geology.Gk500Source(downloader, paths));
 });
 builder.Services.AddSingleton<JobManager>();
 

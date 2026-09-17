@@ -145,11 +145,24 @@ button.ghost {
   background: transparent;
 }
 
-button.fix {
-  width: 100%;
-  background: #fff8e1;
-  border-color: #e0a800;
-  margin: 2px 0 8px;
+.note {
+  color: #1b4d7a;
+  background: #e8f1fb;
+  border: 1px solid #b7d3ee;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 6px 0;
+  line-height: 1.4;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: #555;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #ddd;
 }
 
 button.link {
@@ -178,6 +191,17 @@ button.link {
   background: #d32f2f;
   color: #fff;
   border-color: #a52020;
+}
+
+.model-extras {
+  margin: 4px 0 8px;
+  padding: 6px 8px;
+  border: 1px dashed #bbb;
+  border-radius: 4px;
+}
+
+.model-extras.disabled {
+  opacity: 0.55;
 }
 
 .spawn-row {
@@ -258,4 +282,42 @@ footer {
 footer p {
   margin: 4px 0;
   word-break: break-all;
+}
+
+details.blocks {
+  margin: -2px 0 8px 22px;
+  font-size: 12px;
+}
+
+details.blocks summary {
+  cursor: pointer;
+  color: #555;
+}
+
+details.blocks .badge {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: #ff8800;
+  color: #fff;
+  font-size: 11px;
+}
+
+details.blocks .block-row {
+  display: grid;
+  grid-template-columns: 1fr 150px;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0;
+  color: #444;
+}
+
+details.blocks select {
+  padding: 2px 4px;
+  font-size: 12px;
+}
+
+details.blocks select.changed {
+  border-color: #ff8800;
+  background: #fff7ee;
 }

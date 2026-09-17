@@ -1,7 +1,21 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { ApiService } from '../api/api.service';
-import { Defaults, Estimate, JobDto, JobRequest, OutputMode, OverviewStatus, SourceKind } from '../api/models';
+import {
+  BlockRole,
+  BuildingModelKind,
+  DatasetsStatus,
+  Defaults,
+  Estimate,
+  JobDto,
+  JobRequest,
+  LandCoverKind,
+  OutputMode,
+  OverviewStatus,
+  RegionInfo,
+  RegionLevel,
+  SourceKind,
+} from '../api/models';
 import { Lv95Point, Lv95Rect, rectsEqual, snapRect } from '../geo/lv95';
 
 export interface Settings {
@@ -18,6 +32,17 @@ export interface Settings {
   trees: boolean;
   vegetation: boolean;
   resources: boolean;
+  landCover: LandCoverKind;
+  buildingModel: BuildingModelKind;
+  roads: boolean;
+  rails: boolean;
+  buildings: boolean;
+  powerLines: boolean;
+  villagers: boolean;
+  streetSigns: boolean;
+  geology: boolean;
+  /** Block role overrides (role key -> vanilla block name); roles not listed use their default. */
+  blocks: Record<string, string>;
   snowLine: number;
   slopeStoneDegrees: number;
   outputMode: OutputMode;
@@ -47,6 +72,16 @@ const DEFAULT_SETTINGS: Settings = {
   trees: true,
   vegetation: true,
   resources: true,
+  landCover: 'tlm3d',
+  buildingModel: 'swissBuildings3d',
+  roads: false,
+  rails: false,
+  buildings: false,
+  powerLines: false,
+  villagers: false,
+  streetSigns: false,
+  geology: true,
+  blocks: {},
   snowLine: 2500,
   slopeStoneDegrees: 32,
   outputMode: 'folder',
@@ -74,6 +109,22 @@ export class AppState {
   readonly jobError = signal<string | null>(null);
   readonly cursor = signal<CursorInfo | null>(null);
   readonly backendError = signal<string | null>(null);
+  /** While true, metres per block is raised automatically so the relief keeps true proportions. */
+  readonly autoScale = signal(true);
+  /** Explains the last automatic adjustment, if any. */
+  readonly scaleNotice = signal<string | null>(null);
+  /** Download state of the swisstopo landscape model GeoPackages. */
+  readonly datasets = signal<DatasetsStatus | null>(null);
+  private datasetTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Block roles the user may override and the vanilla blocks on offer. */
+  readonly blockRoles = signal<BlockRole[]>([]);
+  readonly blockChoices = signal<string[]>([]);
+  /** Click-to-select an administrative unit. */
+  readonly regionMode = signal(false);
+  readonly regionLevel = signal<RegionLevel>('municipality');
+  readonly region = signal<RegionInfo | null>(null);
+  readonly regionBusy = signal(false);
+  readonly regionError = signal<string | null>(null);
 
   /** The spawn that will be used: explicit or the centre of the selection. */
   readonly effectiveSpawn = computed<Lv95Point | null>(() => {
@@ -107,6 +158,66 @@ export class AppState {
     });
     void this.loadDefaults();
     void this.pollOverview();
+    void this.refreshDatasets();
+    void this.loadBlocks();
+  }
+
+  private async loadBlocks(): Promise<void> {
+    try {
+      const b = await this.api.getBlocks();
+      this.blockRoles.set(b.roles);
+      this.blockChoices.set(b.choices);
+    } catch {
+      /* backend not reachable; loadDefaults reports that */
+    }
+  }
+
+  /** Sets the block for a role; the role's default removes the override. */
+  setBlock(role: string, block: string): void {
+    const def = this.blockRoles().find((r) => r.key === role)?.default;
+    this.settings.update((s) => {
+      const blocks = { ...s.blocks };
+      if (!block || block === def) delete blocks[role];
+      else blocks[role] = block;
+      return { ...s, blocks };
+    });
+  }
+
+  /** Resolves the administrative unit under a map click and selects its bounding box. */
+  async pickRegion(e: number, n: number): Promise<void> {
+    this.regionBusy.set(true);
+    this.regionError.set(null);
+    try {
+      const r = await this.api.getRegion(e, n, this.regionLevel());
+      this.setSelection(r.bounds, r);
+      this.regionMode.set(false);
+    } catch (err) {
+      this.regionError.set(errorMessage(err));
+    } finally {
+      this.regionBusy.set(false);
+    }
+  }
+
+  /** Reads the dataset states; keeps polling while a download is running. */
+  async refreshDatasets(): Promise<void> {
+    if (this.datasetTimer) clearTimeout(this.datasetTimer);
+    try {
+      const d = await this.api.getDatasets();
+      this.datasets.set(d);
+      if (d.tlm3d.phase === 'tlm' || d.tlmRegio.phase === 'tlm') {
+        this.datasetTimer = setTimeout(() => void this.refreshDatasets(), 2000);
+      }
+    } catch {
+      /* backend not reachable; loadDefaults reports that */
+    }
+  }
+
+  async prepareDataset(kind: 'tlm3d' | 'regio'): Promise<void> {
+    try {
+      await this.api.prepareDataset(kind);
+    } finally {
+      void this.refreshDatasets();
+    }
   }
 
   async loadDefaults(): Promise<void> {
@@ -137,24 +248,51 @@ export class AppState {
     }
   }
 
-  updateSettings(patch: Partial<Settings>): void {
+  /**
+   * Applies a settings change. A metres-per-block value chosen by the user turns the automatic
+   * scale adjustment off; automatic changes pass `automatic: true`.
+   */
+  updateSettings(patch: Partial<Settings>, automatic = false): void {
     this.settings.update((s) => ({ ...s, ...patch }));
     if (patch.metresPerBlock !== undefined) {
+      if (!automatic) {
+        this.autoScale.set(false);
+        this.scaleNotice.set(null);
+      }
       const sel = this.selection();
-      if (sel) this.setSelection(sel);
+      if (sel) this.setSelection(sel, this.region());
     }
   }
 
-  /** Sets the selection, snapped to whole blocks for the current scale. */
-  setSelection(rect: Lv95Rect | null): void {
+  /** Restores every setting to its default (the saves folder stays), and re-enables automatic scaling. */
+  resetSettings(): void {
+    const savesDir = this.settings().savesDir || this.defaults()?.savesDir || '';
+    this.settings.set({ ...DEFAULT_SETTINGS, savesDir });
+    this.autoScale.set(true);
+    this.scaleNotice.set(null);
+    const sel = this.selection();
+    if (sel) this.setSelection(sel, this.region());
+  }
+
+  /**
+   * Sets the selection, snapped to whole blocks for the current scale. A region passed along
+   * keeps its outline on the map; any other change drops the region.
+   */
+  setSelection(rect: Lv95Rect | null, region: RegionInfo | null = null): void {
     if (rect === null) {
       this.selection.set(null);
       this.spawn.set(null);
       this.spawnMode.set(false);
+      this.region.set(null);
       return;
     }
     const snapped = snapRect(rect, this.settings().metresPerBlock);
-    if (!rectsEqual(snapped, this.selection())) this.selection.set(snapped);
+    if (!rectsEqual(snapped, this.selection())) {
+      this.selection.set(snapped);
+      this.region.set(region);
+    } else if (region) {
+      this.region.set(region);
+    }
     const sp = this.spawn();
     if (sp) this.spawn.set(clampPoint(sp, snapped));
   }
@@ -194,6 +332,14 @@ export class AppState {
       if (seq === this.estimateSeq) {
         this.estimate.set(est);
         this.estimateError.set(null);
+        const tp = est.trueProportionMetresPerBlock;
+        if (this.autoScale() && s.verticalScaleMode === 'auto' && tp !== null && tp > s.metresPerBlock) {
+          this.scaleNotice.set(
+            `Scale raised from ${s.metresPerBlock} to ${tp} m per block so the relief keeps true proportions ` +
+              `(${est.elevationMin} – ${est.elevationMax} m of relief has to fit ${319 - s.baseY - 4} blocks). Pick a scale yourself to override.`,
+          );
+          this.updateSettings({ metresPerBlock: tp }, true);
+        }
       }
     } catch (err) {
       if (seq === this.estimateSeq) this.estimateError.set(errorMessage(err));
@@ -219,6 +365,16 @@ export class AppState {
       trees: s.trees,
       vegetation: s.vegetation,
       resources: s.resources,
+      landCover: s.landCover,
+      buildingModel: s.buildingModel,
+      roads: s.roads,
+      rails: s.rails,
+      buildings: s.buildings,
+      powerLines: s.powerLines,
+      villagers: s.villagers,
+      streetSigns: s.streetSigns,
+      geology: s.geology,
+      blocks: Object.keys(s.blocks).length > 0 ? s.blocks : null,
       snowLine: s.snowLine,
       slopeStoneDegrees: s.slopeStoneDegrees,
       outputMode: s.outputMode,

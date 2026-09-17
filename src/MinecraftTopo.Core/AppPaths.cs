@@ -10,6 +10,8 @@ public sealed class AppPaths
     // v3: tiles include water and forest; older folders are stale.
     public string OverviewTileCacheDir => Path.Combine(CacheDir, "overview-tiles-v3");
     public string WaterCacheDir => Path.Combine(CacheDir, "water");
+    public string Buildings3dCacheDir => Path.Combine(CacheDir, "buildings3d");
+    public string GeologyCacheDir => Path.Combine(CacheDir, "geology");
     public string JobsDir => Path.Combine(Root, "jobs");
 
     public AppPaths(string? root = null)
@@ -21,6 +23,8 @@ public sealed class AppPaths
         Directory.CreateDirectory(Alti3dCacheDir);
         Directory.CreateDirectory(OverviewTileCacheDir);
         Directory.CreateDirectory(WaterCacheDir);
+        Directory.CreateDirectory(Buildings3dCacheDir);
+        Directory.CreateDirectory(GeologyCacheDir);
         Directory.CreateDirectory(JobsDir);
     }
 

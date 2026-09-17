@@ -2,7 +2,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, firstValueFrom } from 'rxjs';
 import { Lv95Rect } from '../geo/lv95';
-import { Defaults, Estimate, JobDto, JobRequest, OverviewStatus, SourceKind } from './models';
+import { BlocksInfo, DatasetStatus, DatasetsStatus, Defaults, Estimate, JobDto, JobRequest, OverviewStatus, RegionInfo, RegionLevel, SourceKind } from './models';
 
 export interface EstimateParams {
   area: Lv95Rect;
@@ -60,6 +60,23 @@ export class ApiService {
 
   revealJob(id: string): Promise<void> {
     return firstValueFrom(this.http.post<void>(`/api/jobs/${id}/reveal`, {}));
+  }
+
+  getBlocks(): Promise<BlocksInfo> {
+    return firstValueFrom(this.http.get<BlocksInfo>('/api/blocks'));
+  }
+
+  getRegion(e: number, n: number, level: RegionLevel): Promise<RegionInfo> {
+    const params = new HttpParams().set('e', e.toFixed(1)).set('n', n.toFixed(1)).set('level', level);
+    return firstValueFrom(this.http.get<RegionInfo>('/api/region', { params }));
+  }
+
+  getDatasets(): Promise<DatasetsStatus> {
+    return firstValueFrom(this.http.get<DatasetsStatus>('/api/datasets'));
+  }
+
+  prepareDataset(kind: 'tlm3d' | 'regio'): Promise<DatasetStatus> {
+    return firstValueFrom(this.http.post<DatasetStatus>(`/api/datasets/${kind}/prepare`, {}));
   }
 
   clearCache(): Promise<{ cacheBytes: number }> {

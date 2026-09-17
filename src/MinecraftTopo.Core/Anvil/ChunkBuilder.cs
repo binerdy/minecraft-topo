@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Numerics;
 using MinecraftTopo.Core.Nbt;
 using MinecraftTopo.Core.Terrain;
+using MinecraftTopo.Core.Water;
 
 namespace MinecraftTopo.Core.Anvil;
 
@@ -56,6 +57,25 @@ public static class Blocks
     public const byte RedMushroom = 45;
     public const byte Clay = 46;
     public const byte Seagrass = 47;
+    public const byte RailNorthSouth = 48;
+    public const byte RailEastWest = 49;
+    public const byte RailNorthEast = 50;
+    public const byte RailNorthWest = 51;
+    public const byte RailSouthEast = 52;
+    public const byte RailSouthWest = 53;
+    public const byte RailAscendingNorth = 54;
+    public const byte RailAscendingSouth = 55;
+    public const byte RailAscendingEast = 56;
+    public const byte RailAscendingWest = 57;
+    public const byte GrayConcrete = 58;
+    public const byte LightGrayConcrete = 59;
+    public const byte Cobblestone = 60;
+    public const byte StoneBricks = 61;
+    public const byte WhiteConcrete = 62;
+    public const byte SmoothSandstone = 63;
+    public const byte Bricks = 64;
+    public const byte SmoothStone = 65;
+    public const byte Glass = 66;
 
     public static readonly string[] Names =
     [
@@ -70,9 +90,13 @@ public static class Blocks
         "minecraft:diamond_ore", "minecraft:deepslate_diamond_ore", "minecraft:emerald_ore", "minecraft:deepslate_emerald_ore",
         "minecraft:bee_nest", "minecraft:bee_nest", "minecraft:sweet_berry_bush", "minecraft:pumpkin",
         "minecraft:brown_mushroom", "minecraft:red_mushroom", "minecraft:clay", "minecraft:seagrass",
+        "minecraft:rail", "minecraft:rail", "minecraft:rail", "minecraft:rail", "minecraft:rail",
+        "minecraft:rail", "minecraft:rail", "minecraft:rail", "minecraft:rail", "minecraft:rail",
+        "minecraft:gray_concrete", "minecraft:light_gray_concrete", "minecraft:cobblestone", "minecraft:stone_bricks", "minecraft:white_concrete",
+        "minecraft:smooth_sandstone", "minecraft:bricks", "minecraft:smooth_stone", "minecraft:glass",
     ];
 
-    /// <summary>Block state properties that must be written (leaves must be persistent or they decay; tall grass has two halves).</summary>
+    /// <summary>Block state properties that must be written (leaves must be persistent or they decay; tall grass has two halves; rails need a shape).</summary>
     public static readonly IReadOnlyDictionary<byte, (string Key, string Value)[]> Properties = new Dictionary<byte, (string, string)[]>
     {
         [OakLeaves] = [("persistent", "true")],
@@ -82,6 +106,16 @@ public static class Blocks
         [BeeNest] = [("facing", "south"), ("honey_level", "0")],
         [BeeNestFull] = [("facing", "south"), ("honey_level", "5")],
         [SweetBerryBush] = [("age", "3")],
+        [RailNorthSouth] = [("shape", "north_south")],
+        [RailEastWest] = [("shape", "east_west")],
+        [RailNorthEast] = [("shape", "north_east")],
+        [RailNorthWest] = [("shape", "north_west")],
+        [RailSouthEast] = [("shape", "south_east")],
+        [RailSouthWest] = [("shape", "south_west")],
+        [RailAscendingNorth] = [("shape", "ascending_north")],
+        [RailAscendingSouth] = [("shape", "ascending_south")],
+        [RailAscendingEast] = [("shape", "ascending_east")],
+        [RailAscendingWest] = [("shape", "ascending_west")],
     };
 
     private static readonly byte[] Flowers = [Dandelion, Poppy, Cornflower, OxeyeDaisy, AzureBluet];
@@ -105,6 +139,68 @@ public static class Blocks
         if (resources && r < 406) return Pumpkin;
         return Air;
     }
+
+    public static byte RoadBlock(RoadMaterial m) => m switch
+    {
+        RoadMaterial.Asphalt => GrayConcrete,
+        RoadMaterial.LightAsphalt => LightGrayConcrete,
+        RoadMaterial.DirtPath => Dirt, // topped by a dirt path via RoadTopBlock
+        RoadMaterial.Gravel => RoadGravel,
+        RoadMaterial.Cobblestone => Cobblestone,
+        RoadMaterial.StoneBricks => StoneBricks,
+        _ => GrayConcrete,
+    };
+
+    public static byte RoadTopBlock(RoadMaterial m) => m == RoadMaterial.DirtPath ? DirtPathBlock : RoadBlock(m);
+
+    public const byte DirtPathBlock = 67;
+    // 68..73 are defined in Terrain.StructureBlocks (iron bars, oak fence, chain x/z, smooth quartz, deepslate tiles)
+    /// <summary>Standing oak sign with rotation r is id OakSign0 + r (r = 0..15).</summary>
+    public const byte OakSign0 = 74;
+    public const byte Mud = 90;
+    public const byte PackedIce = 91;
+    public const byte Azalea = 92;
+    // Separate ids for blocks that share a default name, so each role can be overridden on its own.
+    public const byte RoadGravel = 93;
+    public const byte RailBed = 94;
+    public const byte RoadMarking = 95;
+    public const byte IndustrialRoof = 96;
+    public const byte WallLight = 97;
+    public const byte ChurchWall = 98;
+    /// <summary>GK500 lithology class c (1..23) is id GeologyBase + c - 1.</summary>
+    public const byte GeologyBase = 99;
+    public const int GeologyClasses = 23;
+
+    public static bool IsGeology(byte b) => b >= GeologyBase && b < GeologyBase + GeologyClasses;
+    public static byte GeologyBlock(byte lithologyClass) => lithologyClass is >= 1 and <= GeologyClasses ? (byte)(GeologyBase + lithologyClass - 1) : Stone;
+
+    public static readonly string[] ExtraNames =
+    [
+        "minecraft:dirt_path", "minecraft:iron_bars", "minecraft:oak_fence", "minecraft:chain", "minecraft:chain", "minecraft:smooth_quartz",
+        "minecraft:deepslate_tiles",
+        .. Enumerable.Repeat("minecraft:oak_sign", 16),
+        "minecraft:mud", "minecraft:packed_ice", "minecraft:azalea",
+        "minecraft:gravel", "minecraft:gravel", "minecraft:white_concrete", "minecraft:gray_concrete", "minecraft:light_gray_concrete", "minecraft:stone_bricks",
+        // GK500 lithology classes 1..23 (defaults; see BlockRoles)
+        "minecraft:clay", "minecraft:gravel", "minecraft:cobblestone", "minecraft:tuff", "minecraft:sandstone", "minecraft:packed_mud", "minecraft:deepslate",
+        "minecraft:stone", "minecraft:diorite", "minecraft:terracotta", "minecraft:white_terracotta", "minecraft:granite", "minecraft:polished_granite",
+        "minecraft:basalt", "minecraft:polished_tuff", "minecraft:calcite", "minecraft:smooth_quartz", "minecraft:polished_andesite", "minecraft:polished_deepslate",
+        "minecraft:andesite", "minecraft:cobbled_deepslate", "minecraft:blackstone", "minecraft:polished_blackstone",
+    ];
+
+    /// <summary>Properties for the extra ids (chains need an axis, signs a rotation).</summary>
+    public static readonly IReadOnlyDictionary<byte, (string Key, string Value)[]> ExtraProperties = BuildExtraProperties();
+
+    private static Dictionary<byte, (string, string)[]> BuildExtraProperties()
+    {
+        var d = new Dictionary<byte, (string, string)[]>
+        {
+            [StructureBlocks.ChainX] = [("axis", "x")],
+            [StructureBlocks.ChainZ] = [("axis", "z")],
+        };
+        for (int r = 0; r < 16; r++) d[(byte)(OakSign0 + r)] = [("rotation", r.ToString())];
+        return d;
+    }
 }
 
 /// <summary>Builds and compresses one chunk's NBT from classified terrain.</summary>
@@ -123,6 +219,25 @@ public static class ChunkBuilder
 
     private readonly record struct BeeNestEntity(int X, int Y, int Z);
 
+    /// <summary>Per-column infrastructure info gathered for one chunk.</summary>
+    private struct Column
+    {
+        public short Top, WaterY;
+        public byte Kind;
+        public bool Present, Forest;
+        public byte Bed;                 // resources: 1 = clay bed, 2 = seagrass
+        public byte Road, RoadFlags;     // RoadMaterial + RoadFlag bits
+        public byte Rail;                // RailFlag bits
+        public byte RailShape;           // block id of the rail here (0 = none)
+        public byte BuildingHeight, BuildingFlags;
+        public short BuildingFloor;
+        public byte TowerHeight;         // church tower cells: height above the floor
+        public byte Geology;             // GK500 lithology class (0 = unknown -> plain stone)
+        /// <summary>Y of the surface a road/rail sits on: the terrain top or a bridge deck above water.</summary>
+        public int SurfaceY => WaterY != ClassifiedTerrain.NoWater && WaterY >= Top ? WaterY + 1 : Top;
+        public bool OverWater => WaterY != ClassifiedTerrain.NoWater && WaterY >= Top;
+    }
+
     /// <summary>
     /// Builds chunk (cx, cz). <paramref name="terrain"/> coordinates: block x = cx*16 + i maps to
     /// terrain column x; columns outside the terrain are left as air. Returns zlib-compressed NBT.
@@ -130,12 +245,7 @@ public static class ChunkBuilder
     public static byte[] Build(int cx, int cz, ClassifiedTerrain terrain)
     {
         // ---- gather column info ------------------------------------------------------------
-        Span<short> top = stackalloc short[256];
-        Span<short> water = stackalloc short[256];
-        Span<byte> kind = stackalloc byte[256];
-        Span<bool> present = stackalloc bool[256];
-        Span<bool> forest = stackalloc bool[256];
-        Span<byte> bed = stackalloc byte[256]; // 0 = sand bed, 1 = clay bed, +2 = seagrass above the bed
+        var cols = new Column[256];
         int chunkMaxY = int.MinValue;
         int snowy = 0, stony = 0, watery = 0, forested = 0, spruces = 0, oaks = 0, count = 0;
         bool resources = terrain.Resources;
@@ -146,15 +256,18 @@ public static class ChunkBuilder
             {
                 int tx = cx * 16 + lx;
                 int i = lz * 16 + lx;
-                if (tx < 0 || tz < 0 || tx >= terrain.Width || tz >= terrain.Height) { present[i] = false; continue; }
-                present[i] = true;
-                top[i] = terrain.TopAt(tx, tz);
-                water[i] = terrain.WaterAt(tx, tz);
-                var k = terrain.KindAt(tx, tz);
-                kind[i] = (byte)k;
-                forest[i] = terrain.IsForest(tx, tz);
+                if (tx < 0 || tz < 0 || tx >= terrain.Width || tz >= terrain.Height) continue;
+                int gi = tz * terrain.Width + tx;
+                ref var c = ref cols[i];
+                c.Present = true;
+                c.Top = terrain.TopY[gi];
+                c.WaterY = terrain.WaterY[gi];
+                var k = terrain.Kind[gi];
+                c.Kind = (byte)k;
+                c.Forest = terrain.IsForest(tx, tz);
+                c.Geology = terrain.Geology?[gi] ?? 0;
                 count++;
-                if (k == Surface.Snow) snowy++;
+                if (k is Surface.Snow or Surface.Glacier) snowy++;
                 if (k == Surface.Stone) stony++;
                 if (k == Surface.Water)
                 {
@@ -162,11 +275,36 @@ public static class ChunkBuilder
                     if (resources)
                     {
                         uint wh = TreePlanner.Hash(tx, tz, terrain.Seed ^ 0x5EA);
-                        bed[i] = (byte)((wh % 100 < 35 ? 1 : 0) + ((wh >> 8) % 100 < 15 && water[i] - top[i] >= 2 ? 2 : 0));
+                        c.Bed = (byte)((wh % 100 < 35 ? 1 : 0) + ((wh >> 8) % 100 < 15 && c.WaterY - c.Top >= 2 ? 2 : 0));
                     }
                 }
-                if (forest[i]) forested++;
+                if (c.Forest) forested++;
                 int colTop = terrain.ColumnTop(tx, tz);
+
+                if (terrain.Road is not null && terrain.Road[gi] != 0)
+                {
+                    c.Road = terrain.Road[gi];
+                    c.RoadFlags = terrain.RoadFlags![gi];
+                    colTop = Math.Max(colTop, c.SurfaceY);
+                }
+                if (terrain.Rail is not null && terrain.Rail[gi] != 0)
+                {
+                    c.Rail = terrain.Rail[gi];
+                    if ((c.Rail & RailFlag.Track) != 0)
+                    {
+                        c.RailShape = RailShape(terrain, tx, tz, c.SurfaceY + 1);
+                        colTop = Math.Max(colTop, c.SurfaceY + 1);
+                    }
+                    else colTop = Math.Max(colTop, c.SurfaceY);
+                }
+                if (terrain.BuildingHeight is not null && terrain.BuildingHeight[gi] != 0)
+                {
+                    c.BuildingHeight = terrain.BuildingHeight[gi];
+                    c.BuildingFloor = terrain.BuildingFloor![gi];
+                    c.BuildingFlags = terrain.BuildingFlags![gi];
+                    c.TowerHeight = terrain.BuildingTower?[gi] ?? 0;
+                    colTop = Math.Max(colTop, c.BuildingFloor + Math.Max(c.BuildingHeight + 1, c.TowerHeight));
+                }
                 if (colTop > chunkMaxY) chunkMaxY = colTop;
             }
         }
@@ -215,18 +353,75 @@ public static class ChunkBuilder
             }
         }
 
-        // ---- ground cover on grass columns (never where a trunk or nest stands) --------------
+        // ---- pylons, poles, wind turbines and their wires ------------------------------------------
+        foreach (var s in terrain.Structures.Get(cx, cz))
+        {
+            overlay ??= new Dictionary<int, byte>(512);
+            var o = overlay;
+            int ground = terrain.ColumnTop(s.X, s.Z);
+            StructurePlanner.Rasterize(s, terrain.MetresPerBlock, TerrainOptions.WorldMaxY - ground, (x, z, dy, block) =>
+            {
+                int lx = x - cx * 16, lz = z - cz * 16;
+                if (lx < 0 || lz < 0 || lx > 15 || lz > 15) return;
+                int y = ground + dy;
+                if (y > TerrainOptions.WorldMaxY) return;
+                int key = ((y - TerrainOptions.WorldMinY) << 8) | (lz << 4) | lx;
+                o[key] = block; // structures win over leaves and plants
+                if (y > chunkMaxY) chunkMaxY = y;
+            });
+        }
+        foreach (var (wire, y0, y1) in terrain.Wires.Get(cx, cz))
+        {
+            overlay ??= new Dictionary<int, byte>(512);
+            var o = overlay;
+            StructurePlanner.RasterizeWire(wire, y0, y1, (x, z, y, block) =>
+            {
+                int lx = x - cx * 16, lz = z - cz * 16;
+                if (lx < 0 || lz < 0 || lx > 15 || lz > 15 || y > TerrainOptions.WorldMaxY) return;
+                int key = ((y - TerrainOptions.WorldMinY) << 8) | (lz << 4) | lx;
+                if (!o.ContainsKey(key)) o[key] = block;
+                if (y > chunkMaxY) chunkMaxY = y;
+            });
+        }
+
+        // ---- street name signs on the ground beside the road ----------------------------------------
+        List<(int X, int Y, int Z, string[] Lines)>? signs = null;
+        foreach (var sign in terrain.Signs.Get(cx, cz))
+        {
+            int lx = sign.X - cx * 16, lz = sign.Z - cz * 16;
+            if (lx < 0 || lz < 0 || lx > 15 || lz > 15) continue;
+            ref var c = ref cols[lz * 16 + lx];
+            if (!c.Present || c.Road != 0 || c.Rail != 0 || c.BuildingHeight != 0 || (Surface)c.Kind == Surface.Water) continue;
+            int y = c.Top + 1;
+            if (y > TerrainOptions.WorldMaxY) continue;
+            int key = ((y - TerrainOptions.WorldMinY) << 8) | (lz << 4) | lx;
+            overlay ??= new Dictionary<int, byte>(512);
+            if (overlay.ContainsKey(key)) continue;
+            overlay[key] = (byte)(Blocks.OakSign0 + sign.Rotation);
+            (signs ??= []).Add((sign.X, y, sign.Z, sign.Lines));
+            if (y > chunkMaxY) chunkMaxY = y;
+        }
+
+        // ---- ground cover on grass columns (never on roads, rails, buildings, trunks or nests) --
         if (terrain.Vegetation && count > 0)
         {
             overlay ??= new Dictionary<int, byte>(512);
             for (int i = 0; i < 256; i++)
             {
-                if (!present[i] || (Surface)kind[i] != Surface.Grass) continue;
+                ref var c = ref cols[i];
+                if (!c.Present || c.Road != 0 || c.Rail != 0 || c.BuildingHeight != 0) continue;
+                var kindHere = (Surface)c.Kind;
+                if (kindHere is not (Surface.Grass or Surface.Vineyard or Surface.Mud)) continue;
                 int tx = cx * 16 + (i & 15), tz = cz * 16 + (i >> 4);
                 uint hash = TreePlanner.Hash(tx, tz, terrain.Seed ^ 0x5EED_1234L);
-                byte plant = Blocks.PickPlant(hash, forest[i], resources);
+                byte plant = kindHere switch
+                {
+                    Surface.Vineyard => tx % 3 == 0 ? Blocks.Azalea : (hash % 100 < 25 ? Blocks.ShortGrass : Blocks.Air), // rows of vines
+                    Surface.Mud => hash % 100 < 45 ? (hash % 2 == 0 ? Blocks.Fern : Blocks.ShortGrass) : Blocks.Air,       // reeds
+                    _ => Blocks.PickPlant(hash, c.Forest, resources),
+                };
                 if (plant == Blocks.Air) continue;
-                int y = top[i] + 1;
+                int y = c.Top + 1;
                 if (y + 1 > TerrainOptions.WorldMaxY) continue;
                 int key = ((y - TerrainOptions.WorldMinY) << 8) | i;
                 if (overlay.ContainsKey(key)) continue;
@@ -251,6 +446,7 @@ public static class ChunkBuilder
             : forested * 2 >= count ? (spruces > oaks ? BiomeTaiga : BiomeForest)
             : BiomePlains;
         bool coarseForest = terrain.CoarseForest;
+        bool windows = terrain.MetresPerBlock <= 2;
 
         // ---- write NBT --------------------------------------------------------------------------
         using var raw = new MemoryStream(32 * 1024);
@@ -264,10 +460,14 @@ public static class ChunkBuilder
         w.WriteLong("LastUpdate", 0);
         w.WriteLong("InhabitedTime", 0);
 
-        w.BeginList("block_entities", TagType.Compound, nests?.Count ?? 0);
+        w.BeginList("block_entities", TagType.Compound, (nests?.Count ?? 0) + (signs?.Count ?? 0));
         if (nests is not null)
         {
             foreach (var n in nests) WriteBeeNest(w, n);
+        }
+        if (signs is not null)
+        {
+            foreach (var (sx, sy, sz, lines) in signs) WriteSign(w, sx, sy, sz, lines);
         }
         // Bookkeeping tags the game writes itself; empty here (verified against a 26.3 chunk).
         w.BeginList("block_ticks", TagType.Compound, 0);
@@ -283,7 +483,8 @@ public static class ChunkBuilder
 
         w.BeginList("sections", TagType.Compound, SectionCount);
         Span<byte> blocks = stackalloc byte[4096];
-        Span<int> paletteIndex = stackalloc int[Blocks.Names.Length];
+        var palette = terrain.Palette;
+        Span<int> paletteIndex = stackalloc int[palette.Names.Length];
         for (int s = 0; s < SectionCount; s++)
         {
             int sy = MinSectionY + s;
@@ -301,9 +502,10 @@ public static class ChunkBuilder
                     int y = baseY + ly;
                     for (int i = 0; i < 256; i++)
                     {
-                        if (!present[i]) continue;
-                        byte b = BlockAt(y, top[i], (Surface)kind[i], water[i], forest[i] && coarseForest, bed[i]);
-                        if (b == Blocks.Air && overlay is not null && y > top[i])
+                        ref var c = ref cols[i];
+                        if (!c.Present) continue;
+                        byte b = BlockAt(y, in c, coarseForest, windows, i);
+                        if (b == Blocks.Air && overlay is not null && y > c.Top)
                         {
                             int key = ((y - TerrainOptions.WorldMinY) << 8) | i;
                             if (overlay.TryGetValue(key, out var ob)) b = ob;
@@ -322,7 +524,7 @@ public static class ChunkBuilder
                     {
                         int idx = (e >> 12) * 256 + ((e >> 4) & 255);
                         var ore = OrePlanner.Ores[e & 15];
-                        if (blocks[idx] == Blocks.Stone) blocks[idx] = ore.Stone;
+                        if (blocks[idx] == Blocks.Stone || Blocks.IsGeology(blocks[idx])) blocks[idx] = ore.Stone;
                         else if (blocks[idx] == Blocks.Deepslate) blocks[idx] = ore.Deepslate;
                     }
                 }
@@ -332,22 +534,22 @@ public static class ChunkBuilder
             if (!anyNonAir)
             {
                 w.BeginList("palette", TagType.String, 1);
-                w.WriteString(null, Blocks.Names[Blocks.Air]);
+                w.WriteString(null, palette.Names[Blocks.Air]);
             }
             else
             {
                 // Build palette (block id -> palette index) in order of first appearance.
                 paletteIndex.Fill(-1);
-                var palette = new List<byte>(8);
+                var used = new List<byte>(8);
                 foreach (byte b in blocks)
                 {
-                    if (paletteIndex[b] < 0) { paletteIndex[b] = palette.Count; palette.Add(b); }
+                    if (paletteIndex[b] < 0) { paletteIndex[b] = used.Count; used.Add(b); }
                 }
-                WritePalette(w, palette);
+                WritePalette(w, palette, used);
 
-                if (palette.Count > 1)
+                if (used.Count > 1)
                 {
-                    int bits = Math.Max(4, BitOperations.Log2((uint)(palette.Count - 1)) + 1);
+                    int bits = Math.Max(4, BitOperations.Log2((uint)(used.Count - 1)) + 1);
                     int perLong = 64 / bits;
                     var data = new long[(4096 + perLong - 1) / perLong];
                     for (int i = 0; i < 4096; i++)
@@ -379,6 +581,65 @@ public static class ChunkBuilder
         return output.ToArray();
     }
 
+    /// <summary>Y of the rail block in a column, or int.MinValue when there is no track there.</summary>
+    private static int RailY(ClassifiedTerrain t, int tx, int tz)
+    {
+        if (tx < 0 || tz < 0 || tx >= t.Width || tz >= t.Height) return int.MinValue;
+        int gi = tz * t.Width + tx;
+        if (t.Rail is null || (t.Rail[gi] & RailFlag.Track) == 0) return int.MinValue;
+        int top = t.TopY[gi];
+        short wy = t.WaterY[gi];
+        int surface = wy != ClassifiedTerrain.NoWater && wy >= top ? wy + 1 : top;
+        return surface + 1;
+    }
+
+    /// <summary>Picks the rail shape from the neighbouring track cells (rails only join orthogonally).</summary>
+    private static byte RailShape(ClassifiedTerrain t, int tx, int tz, int y)
+    {
+        int n = RailY(t, tx, tz - 1), s = RailY(t, tx, tz + 1), e = RailY(t, tx + 1, tz), w = RailY(t, tx - 1, tz);
+        bool hn = n != int.MinValue, hs = s != int.MinValue, he = e != int.MinValue, hw = w != int.MinValue;
+        int conns = (hn ? 1 : 0) + (hs ? 1 : 0) + (he ? 1 : 0) + (hw ? 1 : 0);
+        if (conns == 2)
+        {
+            if (hn && he) return Blocks.RailNorthEast;
+            if (hn && hw) return Blocks.RailNorthWest;
+            if (hs && he) return Blocks.RailSouthEast;
+            if (hs && hw) return Blocks.RailSouthWest;
+        }
+        bool northSouth = hn || hs ? !(he && hw && !(hn && hs)) : false;
+        if (!hn && !hs && !he && !hw) northSouth = true;
+        if (northSouth)
+        {
+            if (hn && n == y + 1) return Blocks.RailAscendingNorth;
+            if (hs && s == y + 1) return Blocks.RailAscendingSouth;
+            return Blocks.RailNorthSouth;
+        }
+        if (he && e == y + 1) return Blocks.RailAscendingEast;
+        if (hw && w == y + 1) return Blocks.RailAscendingWest;
+        return Blocks.RailEastWest;
+    }
+
+    /// <summary>A waxed standing sign with the street name on the front (plain strings are literal text components).</summary>
+    private static void WriteSign(NbtWriter w, int x, int y, int z, string[] lines)
+    {
+        w.BeginCompound(null);
+        w.WriteString("id", "minecraft:sign");
+        w.WriteInt("x", x);
+        w.WriteInt("y", y);
+        w.WriteInt("z", z);
+        w.WriteBool("is_waxed", true);
+        foreach (var side in new[] { "front_text", "back_text" })
+        {
+            w.BeginCompound(side);
+            w.BeginList("messages", TagType.String, 4);
+            for (int i = 0; i < 4; i++) w.WriteString(null, side == "front_text" && i < lines.Length ? lines[i] : "");
+            w.WriteString("color", "black");
+            w.WriteBool("has_glowing_text", false);
+            w.EndCompound();
+        }
+        w.EndCompound();
+    }
+
     /// <summary>A bee nest block entity holding three bees, so honey actually gets produced.</summary>
     private static void WriteBeeNest(NbtWriter w, BeeNestEntity n)
     {
@@ -407,21 +668,23 @@ public static class ChunkBuilder
     /// so as soon as one entry needs properties every entry of that palette becomes a compound.
     /// (The pre-26 form {Name, Properties} is rejected with "No key id" and the section falls back to air.)
     /// </summary>
-    private static void WritePalette(NbtWriter w, List<byte> palette)
+    private static void WritePalette(NbtWriter w, BlockPalette palette, List<byte> used)
     {
-        bool anyProperties = palette.Any(b => Blocks.Properties.ContainsKey(b));
+        var names = palette.Names;
+        var properties = palette.Properties;
+        bool anyProperties = used.Any(properties.ContainsKey);
         if (!anyProperties)
         {
-            w.BeginList("palette", TagType.String, palette.Count);
-            foreach (byte b in palette) w.WriteString(null, Blocks.Names[b]);
+            w.BeginList("palette", TagType.String, used.Count);
+            foreach (byte b in used) w.WriteString(null, names[b]);
             return;
         }
-        w.BeginList("palette", TagType.Compound, palette.Count);
-        foreach (byte b in palette)
+        w.BeginList("palette", TagType.Compound, used.Count);
+        foreach (byte b in used)
         {
             w.BeginCompound(null);
-            w.WriteString("id", Blocks.Names[b]);
-            if (Blocks.Properties.TryGetValue(b, out var props))
+            w.WriteString("id", names[b]);
+            if (properties.TryGetValue(b, out var props))
             {
                 w.BeginCompound("properties");
                 foreach (var (key, value) in props) w.WriteString(key, value);
@@ -431,15 +694,90 @@ public static class ChunkBuilder
         }
     }
 
-    /// <summary>The block at world Y for a column with the given top and surface kind.</summary>
-    private static byte BlockAt(int y, int top, Surface kind, short waterY, bool coarseForest, byte bed)
+    /// <summary>The block at world Y for a column, in precedence order: building, rail, road, terrain.</summary>
+    private static byte BlockAt(int y, in Column c, bool coarseForest, bool windows, int i)
     {
         if (y == TerrainOptions.WorldMinY) return Blocks.Bedrock;
+
+        // Buildings: walls on the footprint edge, a floor slab and a flat roof; a solid base on slopes.
+        if (c.BuildingHeight != 0)
+        {
+            int floor = c.BuildingFloor, top = floor + c.BuildingHeight, roof = top + 1;
+            bool edge = (c.BuildingFlags & BuildingFlag.Edge) != 0;
+            bool industrial = (c.BuildingFlags & BuildingFlag.Industrial) != 0;
+            bool church = (c.BuildingFlags & BuildingFlag.Church) != 0;
+            byte wall = church ? Blocks.ChurchWall
+                : (c.BuildingFlags >> 4) switch { 1 => Blocks.WallLight, 2 => Blocks.SmoothSandstone, _ => Blocks.WhiteConcrete };
+            if (c.TowerHeight != 0)
+            {
+                // church tower: solid stone-brick shaft up to the tower top, spire comes from the overlay
+                int towerTop = floor + c.TowerHeight;
+                if (y > towerTop) return Blocks.Air;
+                if (y > c.Top)
+                {
+                    bool slit = windows && y > floor + 2 && y < towerTop - 1 && (y - floor) % 4 == 0 && (((i & 15) + (i >> 4)) & 1) == 0;
+                    return slit ? Blocks.Glass : wall;
+                }
+            }
+            else
+            {
+                if (y == roof) return church ? StructureBlocks.DeepslateTiles : industrial ? Blocks.IndustrialRoof : Blocks.Bricks;
+                if (y > roof) return Blocks.Air;
+            }
+            if (edge)
+            {
+                if (y > c.Top)
+                {
+                    bool windowRow = windows && y > floor + 1 && y < top && (y - floor - 2) % 3 == 0 && (((i & 15) + (i >> 4)) & 1) == 0;
+                    return windowRow ? Blocks.Glass : wall;
+                }
+            }
+            else
+            {
+                if (y == floor) return Blocks.SmoothStone;
+                if (y > floor) return Blocks.Air;
+                if (y > c.Top) return wall; // base under the floor on sloping ground
+            }
+            // below the terrain top: fall through to terrain
+        }
+
+        int surface = c.SurfaceY;
+
+        // Railways: gravel bed with the rail on top; over water a floating deck.
+        if (c.Rail != 0)
+        {
+            if ((c.Rail & RailFlag.Track) != 0 && y == surface + 1) return c.RailShape;
+            if (y == surface)
+            {
+                if (c.Road != 0) return RoadSurface(in c); // level crossing / tram in the street
+                return Blocks.RailBed;
+            }
+            if (c.OverWater && y > c.Top && y < surface) return Blocks.Water;
+        }
+
+        // Roads: two blocks thick on land, a deck one block above the water on bridges/fords.
+        if (c.Road != 0)
+        {
+            if (y == surface) return RoadSurface(in c);
+            if (!c.OverWater && y == surface - 1) return Blocks.RoadBlock((RoadMaterial)c.Road);
+            if (c.OverWater && y > c.Top && y < surface) return Blocks.Water;
+        }
+
+        return TerrainBlock(y, in c, coarseForest);
+    }
+
+    private static byte RoadSurface(in Column c) =>
+        (c.RoadFlags & RoadFlag.Marking) != 0 ? Blocks.RoadMarking : Blocks.RoadTopBlock((RoadMaterial)c.Road);
+
+    private static byte TerrainBlock(int y, in Column c, bool coarseForest)
+    {
+        int top = c.Top;
+        var kind = (Surface)c.Kind;
         if (y > top)
         {
-            if (waterY != ClassifiedTerrain.NoWater && y <= waterY)
+            if (c.WaterY != ClassifiedTerrain.NoWater && y <= c.WaterY)
             {
-                return y == top + 1 && (bed & 2) != 0 ? Blocks.Seagrass : Blocks.Water;
+                return y == top + 1 && (c.Bed & 2) != 0 ? Blocks.Seagrass : Blocks.Water;
             }
             return Blocks.Air;
         }
@@ -447,12 +785,16 @@ public static class ChunkBuilder
         {
             return kind switch
             {
-                Surface.Grass => coarseForest ? Blocks.MossBlock : Blocks.GrassBlock,
-                Surface.Stone => Blocks.Stone,
+                Surface.Grass => coarseForest && c.Forest ? Blocks.MossBlock : Blocks.GrassBlock,
+                Surface.Stone => Blocks.GeologyBlock(c.Geology),
                 Surface.Snow => Blocks.SnowBlock,
                 Surface.Sand => Blocks.Sand,
-                Surface.Water => (bed & 1) != 0 ? Blocks.Clay : Blocks.Sand,
-                _ => Blocks.Stone,
+                Surface.Water => (c.Bed & 1) != 0 ? Blocks.Clay : Blocks.Sand,
+                Surface.Gravel => Blocks.Gravel,
+                Surface.Glacier => Blocks.SnowBlock,
+                Surface.Mud => Blocks.Mud,
+                Surface.Vineyard => Blocks.GrassBlock,
+                _ => Blocks.GeologyBlock(c.Geology),
             };
         }
         if (y > top - 4)
@@ -461,10 +803,14 @@ public static class ChunkBuilder
             {
                 Surface.Grass => Blocks.Dirt,
                 Surface.Sand => Blocks.Sand,
-                Surface.Water => y > top - 2 ? ((bed & 1) != 0 ? Blocks.Clay : Blocks.Sand) : Blocks.Gravel,
-                _ => Blocks.Stone,
+                Surface.Water => y > top - 2 ? ((c.Bed & 1) != 0 ? Blocks.Clay : Blocks.Sand) : Blocks.Gravel,
+                Surface.Gravel => Blocks.Gravel,
+                Surface.Glacier => Blocks.PackedIce,
+                Surface.Mud => y > top - 2 ? Blocks.Mud : Blocks.Dirt,
+                Surface.Vineyard => Blocks.Dirt,
+                _ => Blocks.GeologyBlock(c.Geology),
             };
         }
-        return y < 0 ? Blocks.Deepslate : Blocks.Stone;
+        return y < 0 ? Blocks.Deepslate : Blocks.GeologyBlock(c.Geology);
     }
 }

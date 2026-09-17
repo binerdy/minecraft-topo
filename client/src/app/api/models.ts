@@ -2,6 +2,8 @@ import { Lv95Rect } from '../geo/lv95';
 
 export type SourceKind = 'auto' | 'swissAlti3d' | 'dhm200' | 'synthetic';
 export type OutputMode = 'folder' | 'zip';
+export type LandCoverKind = 'tlm3d' | 'tlmRegio' | 'vec25';
+export type BuildingModelKind = 'swissBuildings3d' | 'footprints';
 export type JobState = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
 export interface OverviewStatus {
@@ -100,6 +102,17 @@ export interface JobRequest {
   trees: boolean;
   vegetation: boolean;
   resources: boolean;
+  landCover: LandCoverKind;
+  buildingModel: BuildingModelKind;
+  roads: boolean;
+  rails: boolean;
+  buildings: boolean;
+  powerLines: boolean;
+  villagers: boolean;
+  streetSigns: boolean;
+  geology: boolean;
+  /** Block role overrides: role key -> vanilla block name. */
+  blocks: Record<string, string> | null;
   snowLine: number;
   slopeStoneDegrees: number;
   outputMode: OutputMode;
@@ -107,4 +120,43 @@ export interface JobRequest {
   replaceExisting: boolean;
   spawnE: number | null;
   spawnN: number | null;
+}
+
+export interface DatasetStatus {
+  name: string;
+  ready: boolean;
+  phase: string;
+  percent: number;
+  message: string | null;
+  approxBytes: number;
+}
+
+export interface DatasetsStatus {
+  tlm3d: DatasetStatus;
+  tlmRegio: DatasetStatus;
+}
+
+export type BlockGroup = 'terrain' | 'trees' | 'roads' | 'rails' | 'buildings' | 'power' | 'geology';
+
+export interface BlockRole {
+  key: string;
+  label: string;
+  group: BlockGroup;
+  default: string;
+}
+
+export interface BlocksInfo {
+  roles: BlockRole[];
+  choices: string[];
+}
+
+export type RegionLevel = 'municipality' | 'district' | 'canton';
+
+export interface RegionInfo {
+  name: string;
+  level: RegionLevel;
+  bounds: Lv95Rect;
+  areaKm2: number;
+  /** Outer rings as [E, N] pairs. */
+  outline: number[][][];
 }

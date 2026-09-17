@@ -12,6 +12,20 @@ public static class ApiEndpoints
 {
     public const string Attribution = "Elevation data and map tiles © swisstopo (Federal Office of Topography), free geodata (OGD).";
 
+    private static object DatasetDto(MinecraftTopo.Core.Tlm.TlmDatasets tlm, MinecraftTopo.Core.Tlm.TlmKind kind)
+    {
+        var s = tlm.Status(kind);
+        return new
+        {
+            Name = MinecraftTopo.Core.Tlm.TlmDatasets.DisplayName(kind),
+            Ready = tlm.IsReady(kind),
+            s.Phase,
+            s.Percent,
+            s.Message,
+            ApproxBytes = MinecraftTopo.Core.Tlm.TlmDatasets.ApproxBytes(kind),
+        };
+    }
+
     public static void MapApi(this WebApplication app)
     {
         var api = app.MapGroup("/api");
@@ -23,12 +37,12 @@ public static class ApiEndpoints
             return Results.Ok(new { s.Phase, s.Percent, s.Message, Ready = dhm.IsReady });
         });
 
-        api.MapGet("/overview/tiles/{z:int}/{x:int}/{y:int}.png", async (int z, int x, int y, OverviewTileRenderer renderer, HttpContext ctx, CancellationToken ct) =>
+        api.MapGet("/overview/tiles/{z:int}/{x:int}/{y:int}.png", async (int z, int x, int y, bool? roads, OverviewTileRenderer renderer, HttpContext ctx, CancellationToken ct) =>
         {
             if (z < OverviewTileRenderer.MinZoom || z > OverviewTileRenderer.MaxZoom) return Results.NotFound();
             int n = 1 << z;
             if (x < 0 || y < 0 || x >= n || y >= n) return Results.NotFound();
-            var png = await renderer.GetTileAsync(z, x, y, ct);
+            var png = await renderer.GetTileAsync(z, x, y, ct, roads == true);
             ctx.Response.Headers.CacheControl = "public, max-age=86400";
             return Results.Bytes(png, "image/png");
         });
@@ -118,6 +132,59 @@ public static class ApiEndpoints
                 Warnings = warnings,
                 Ok = req.TotalBlocks <= WorldGenerator.MaxBlocks && area.Width > 0 && area.Height > 0,
             });
+        });
+
+        // ---- swisstopo landscape model datasets (one-time downloads) --------------------------------
+        api.MapGet("/datasets", (MinecraftTopo.Core.Tlm.TlmDatasets tlm) => Results.Ok(new
+        {
+            Tlm3d = DatasetDto(tlm, MinecraftTopo.Core.Tlm.TlmKind.Tlm3d),
+            TlmRegio = DatasetDto(tlm, MinecraftTopo.Core.Tlm.TlmKind.Regio),
+        }));
+
+        api.MapPost("/datasets/{kind}/prepare", (string kind, MinecraftTopo.Core.Tlm.TlmDatasets tlm) =>
+        {
+            var k = kind.ToLowerInvariant() switch { "tlm3d" => MinecraftTopo.Core.Tlm.TlmKind.Tlm3d, "regio" or "tlmregio" => MinecraftTopo.Core.Tlm.TlmKind.Regio, _ => (MinecraftTopo.Core.Tlm.TlmKind?)null };
+            if (k is null) return Results.NotFound();
+            if (!tlm.IsReady(k.Value) && tlm.Status(k.Value).Phase != "tlm")
+            {
+                _ = Task.Run(async () =>
+                {
+                    try { await tlm.EnsureAsync(k.Value, null, CancellationToken.None); }
+                    catch (Exception) { /* the status carries the error */ }
+                });
+            }
+            return Results.Ok(DatasetDto(tlm, k.Value));
+        });
+
+        // ---- block roles and choices --------------------------------------------------------------
+        api.MapGet("/blocks", () => Results.Ok(new
+        {
+            Roles = MinecraftTopo.Core.Anvil.BlockRoles.All.Select(r => new { r.Key, r.Label, r.Group, r.Default }),
+            MinecraftTopo.Core.Anvil.BlockRoles.Choices,
+        }));
+
+        // ---- administrative unit under a point (needs the swissTLMRegio boundaries) ------------------
+        api.MapGet("/region", (double e, double n, string? level, MinecraftTopo.Core.Tlm.RegionLookup regions) =>
+        {
+            var lvl = (level ?? "municipality").ToLowerInvariant() switch
+            {
+                "district" or "bezirk" => MinecraftTopo.Core.Tlm.RegionLevel.District,
+                "canton" or "kanton" => MinecraftTopo.Core.Tlm.RegionLevel.Canton,
+                _ => MinecraftTopo.Core.Tlm.RegionLevel.Municipality,
+            };
+            if (!regions.IsAvailable)
+                return Results.Json(new { error = "Selecting a region needs the swissTLMRegio dataset (160 MB one-time download). Download it under Terrain > Water and forest outlines and try again." }, statusCode: 409);
+            try
+            {
+                var r = regions.Find(e, n, lvl);
+                return r is null
+                    ? Results.NotFound(new { error = $"No {lvl.ToString().ToLowerInvariant()} at this point." })
+                    : Results.Ok(new { r.Name, Level = lvl.ToString().ToLowerInvariant(), Bounds = new { r.Bounds.MinE, r.Bounds.MinN, r.Bounds.MaxE, r.Bounds.MaxN }, r.AreaKm2, r.Outline });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Json(new { error = ex.Message }, statusCode: 409);
+            }
         });
 
         // ---- defaults / cache ----------------------------------------------------------------
