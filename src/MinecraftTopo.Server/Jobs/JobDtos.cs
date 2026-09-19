@@ -19,7 +19,9 @@ public sealed record JobRequestDto
     public double MetresPerBlock { get; init; } = 1;
     public ElevationSourceKind Source { get; init; } = ElevationSourceKind.Auto;
     public double Alti3dResolution { get; init; } = 2;
-    public int BaseY { get; init; } = 0;
+    public int BaseY { get; init; } = -60;
+    /// <summary>"auto" (tall up to 2 m per block), "standard" (Y -64..319) or "tall" (Y -2032..2031 through a data pack).</summary>
+    public string WorldHeight { get; init; } = "auto";
     public double? VerticalScale { get; init; }
     public double? WaterLevel { get; init; }
     public bool WaterBodies { get; init; } = true;
@@ -34,8 +36,26 @@ public sealed record JobRequestDto
     public bool PowerLines { get; init; }
     public bool Villagers { get; init; }
     public bool StreetSigns { get; init; }
-    /// <summary>Underground rock types from the GK500 geological map.</summary>
-    public bool Geology { get; init; } = true;
+    /// <summary>Underground rock types: "none", "gk500" or "geocover".</summary>
+    public string Geology { get; init; } = "gk500";
+    /// <summary>0 = today, else 2010, 1973 or 1850.</summary>
+    public int GlacierYear { get; init; }
+    public bool IceToBed { get; init; } = true;
+    public bool LakeFloors { get; init; } = true;
+    public bool VegetationHeights { get; init; }
+    /// <summary>"none", "photo", "photoBlocks", "siegfried", "dufour" or "nationalMap".</summary>
+    public string SurfaceStyle { get; init; } = "none";
+    public bool PlaceNames { get; init; } = true;
+    public bool Extras { get; init; } = true;
+    public bool Jura3d { get; init; }
+    public bool Wildlife { get; init; } = true;
+    public bool Crops { get; init; } = true;
+    public bool StreetLights { get; init; } = true;
+    public bool RoofColours { get; init; } = true;
+    /// <summary>"creative", "survival", "adventure" or "hardcore".</summary>
+    public string GameMode { get; init; } = "creative";
+    /// <summary>"peaceful", "easy", "normal" or "hard".</summary>
+    public string Difficulty { get; init; } = "peaceful";
     /// <summary>Block role overrides: role key -> vanilla block name (see GET /api/blocks).</summary>
     public Dictionary<string, string>? Blocks { get; init; }
     public double SnowLine { get; init; } = 2500;
@@ -70,4 +90,20 @@ public sealed record JobDto(
     string? Error,
     DateTimeOffset CreatedAt,
     DateTimeOffset? FinishedAt,
-    string? DownloadUrl);
+    string? DownloadUrl,
+    string? MapUrl,
+    int MapCellsPerPixel,
+    int BlocksWide,
+    int BlocksHigh,
+    int? SpawnX,
+    int? SpawnY,
+    int? SpawnZ,
+    bool SpawnEditable,
+    IReadOnlyList<string> MapStages,
+    string? MapStage,
+    int ChunksWide,
+    int ChunksHigh,
+    /// <summary>Base64 of one byte per chunk, 1 = written; null before the first chunk.</summary>
+    string? ChunkMask);
+
+public sealed record SpawnRequestDto(int X, int Z);

@@ -29,6 +29,7 @@ public static class OrePlanner
     public static List<int>?[] Plan(int cx, int cz, long seed, int minSectionY, int sectionCount)
     {
         var buckets = new List<int>?[sectionCount];
+        int worldMinY = minSectionY * 16, worldMaxY = worldMinY + sectionCount * 16 - 1;
         for (int o = 0; o < Ores.Length; o++)
         {
             var ore = Ores[o];
@@ -37,7 +38,8 @@ public static class OrePlanner
                 uint h = TreePlanner.Hash(cx * 31 + a, cz * 17 + o * 101, seed ^ 0x0BE5);
                 int x = (int)(h & 15);
                 int z = (int)((h >> 4) & 15);
-                int y = ore.MinY + (int)((h >> 8) % (uint)(ore.MaxY - ore.MinY + 1));
+                int oreMax = ore.MaxY >= 319 ? worldMaxY : ore.MaxY; // "up to the top" follows tall worlds
+                int y = ore.MinY + (int)((h >> 8) % (uint)(oreMax - ore.MinY + 1));
                 for (int k = 0; k < ore.Size; k++)
                 {
                     uint h2 = TreePlanner.Hash(k + 7, a * 131 + o, h);
@@ -46,7 +48,7 @@ public static class OrePlanner
                     int by = y + (int)((h2 >> 4) % 3) - 1;
                     if (ore.Size > 6 && (h2 >> 6) % 4 == 0) { bx += (int)((h2 >> 8) % 3) - 1; bz += (int)((h2 >> 10) % 3) - 1; }
                     if (bx < 0 || bz < 0 || bx > 15 || bz > 15) continue;
-                    if (by <= TerrainOptions.WorldMinY || by > TerrainOptions.WorldMaxY) continue;
+                    if (by <= worldMinY || by > worldMaxY) continue;
                     int section = (by - minSectionY * 16) >> 4;
                     if (section < 0 || section >= sectionCount) continue;
                     int ly = by & 15;

@@ -37,6 +37,49 @@ try
     {
         return VerifyRegion(mcaPath!, opts.GetValueOrDefault("chunk"));
     }
+    if (opts.TryGetValue("gpkg", out var gpkgPath) && gpkgPath is not null)
+    {
+        using var g = new MinecraftTopo.Core.Gpkg.GeoPackage(Path.GetFullPath(gpkgPath));
+        if (opts.TryGetValue("layer", out var layerName) && layerName is not null)
+        {
+            var bbox = opts.TryGetValue("bbox", out var bb) && bb is not null ? ParseRect(bb) : new Lv95Rect(2480000, 1070000, 2840000, 1300000);
+            string attr = opts.GetValueOrDefault("attr") ?? "objektart";
+            var counts = new Dictionary<string, int>();
+            var geomKinds = new Dictionary<string, int>();
+            int n = 0;
+            foreach (var f in g.Query(layerName, bbox, attr))
+            {
+                n++;
+                string v = f.Text(attr);
+                counts[v] = counts.GetValueOrDefault(v) + 1;
+                string gk = f.Geometry.GetType().Name;
+                geomKinds[gk] = geomKinds.GetValueOrDefault(gk) + 1;
+                if (n >= 200000) break;
+            }
+            Console.WriteLine($"{layerName}: {n} features; geometry {string.Join(", ", geomKinds.Select(k => $"{k.Key} {k.Value}"))}");
+            Console.WriteLine($"columns: {string.Join(", ", g.Columns(layerName))}");
+            foreach (var kv in counts.OrderByDescending(k => k.Value).Take(60)) Console.WriteLine($"  {kv.Value,8}  {kv.Key}");
+        }
+        else
+        {
+            foreach (var l in g.Layers.OrderBy(x => x)) Console.WriteLine($"{l}: {string.Join(", ", g.Columns(l))}");
+        }
+        return 0;
+    }
+    if (opts.TryGetValue("png-colors", out var pngPath) && pngPath is not null)
+    {
+        var img = MinecraftTopo.Core.Imaging.PngReader.Decode(File.ReadAllBytes(pngPath));
+        var counts = new Dictionary<(byte, byte, byte, byte), int>();
+        for (int i = 0; i < img.Pixels.Length; i += 4)
+        {
+            var k = (img.Pixels[i], img.Pixels[i + 1], img.Pixels[i + 2], img.Pixels[i + 3]);
+            counts[k] = counts.GetValueOrDefault(k) + 1;
+        }
+        Console.WriteLine($"{img.Width}x{img.Height}, {counts.Count} distinct colours");
+        foreach (var kv in counts.OrderByDescending(k => k.Value).Take(int.Parse(opts.GetValueOrDefault("top") ?? "25")))
+            Console.WriteLine($"  {kv.Value,8}  ({kv.Key.Item1},{kv.Key.Item2},{kv.Key.Item3}) a={kv.Key.Item4}");
+        return 0;
+    }
     if (opts.ContainsKey("list-blocks"))
     {
         foreach (var group in MinecraftTopo.Core.Anvil.BlockRoles.All.GroupBy(r => r.Group))
@@ -112,10 +155,13 @@ try
         BuildingModel = (opts.GetValueOrDefault("building-model") ?? "swisstopo").ToLowerInvariant() is "osm" or "footprints" ? BuildingModelKind.Footprints : BuildingModelKind.SwissBuildings3d,
         LandCover = (opts.GetValueOrDefault("cover") ?? "tlm3d").ToLowerInvariant() switch { "tlm3d" => LandCoverKind.Tlm3d, "regio" or "tlmregio" => LandCoverKind.TlmRegio, _ => LandCoverKind.Vec25 },
         Blocks = ParseBlocks(opts.GetValueOrDefault("blocks")),
+        GameMode = Enum.TryParse<GameMode>(opts.GetValueOrDefault("mode") ?? "creative", true, out var gm) ? gm : GameMode.Creative,
+        Difficulty = Enum.TryParse<Difficulty>(opts.GetValueOrDefault("difficulty") ?? "peaceful", true, out var df) ? df : Difficulty.Peaceful,
         Spawn = opts.TryGetValue("spawn", out var spawnSpec) && spawnSpec is not null ? ParsePoint(spawnSpec) : null,
         Terrain = new TerrainOptions
         {
-            BaseY = (int)ParseDouble(opts.GetValueOrDefault("base-y"), 0),
+            BaseY = (int)ParseDouble(opts.GetValueOrDefault("base-y"), -60),
+            WorldHeight = (opts.GetValueOrDefault("height") ?? (opts.ContainsKey("tall") ? "tall" : "auto")).ToLowerInvariant() switch { "tall" => WorldHeight.Tall, "standard" => WorldHeight.Standard, _ => ParseDouble(opts.GetValueOrDefault("mpb"), 1) <= 2 ? WorldHeight.Tall : WorldHeight.Standard },
             VerticalScale = opts.TryGetValue("vscale", out var vs) && vs is not null && vs != "auto" ? ParseDouble(vs, 1) : null,
             WaterLevel = opts.TryGetValue("water", out var wl) && wl is not null ? ParseDouble(wl, 0) : null,
             WaterBodies = !opts.ContainsKey("no-lakes"),
@@ -128,7 +174,19 @@ try
             PowerLines = opts.ContainsKey("power"),
             Villagers = opts.ContainsKey("villagers"),
             StreetSigns = opts.ContainsKey("signs"),
-            Geology = !opts.ContainsKey("no-geology"),
+            Geology = (opts.GetValueOrDefault("geology") ?? (opts.ContainsKey("no-geology") ? "none" : "gk500")).ToLowerInvariant() switch { "none" => GeologySource.None, "geocover" => GeologySource.GeoCover, _ => GeologySource.Gk500 },
+            GlacierYear = (int)ParseDouble(opts.GetValueOrDefault("glaciers"), 0) switch { 1850 => MinecraftTopo.Core.Glaciers.GlacierYear.Y1850, 1973 => MinecraftTopo.Core.Glaciers.GlacierYear.Y1973, 2010 => MinecraftTopo.Core.Glaciers.GlacierYear.Y2010, _ => MinecraftTopo.Core.Glaciers.GlacierYear.Today },
+            IceToBed = !opts.ContainsKey("no-ice"),
+            LakeFloors = !opts.ContainsKey("no-lake-floors"),
+            VegetationHeights = opts.ContainsKey("canopy"),
+            SurfaceStyle = (opts.GetValueOrDefault("surface") ?? "none").ToLowerInvariant() switch { "photo" => SurfaceStyle.Photo, "photoblocks" => SurfaceStyle.PhotoBlocks, "siegfried" => SurfaceStyle.Siegfried, "dufour" => SurfaceStyle.Dufour, "map" or "nationalmap" => SurfaceStyle.NationalMap, _ => SurfaceStyle.None },
+            PlaceNames = !opts.ContainsKey("no-names"),
+            Extras = !opts.ContainsKey("no-extras"),
+            Jura3d = opts.ContainsKey("jura3d"),
+            Wildlife = !opts.ContainsKey("no-wildlife"),
+            Crops = !opts.ContainsKey("no-crops"),
+            StreetLights = !opts.ContainsKey("no-lights"),
+            RoofColours = !opts.ContainsKey("no-roof-colours"),
             SnowLine = ParseDouble(opts.GetValueOrDefault("snow"), 2500),
             SlopeStoneDegrees = ParseDouble(opts.GetValueOrDefault("slope"), 32),
         },
@@ -144,12 +202,7 @@ try
             ElevationSourceKind.Dhm200 => new Dhm200Source(dhm),
             _ => new SwissAlti3dSource(downloader, paths, r.Alti3dResolution),
         },
-        r => r.ResolveSource() == ElevationSourceKind.Synthetic ? null
-            : r.LandCover == LandCoverKind.Tlm3d ? new MinecraftTopo.Core.Tlm.TlmLandCoverSource(tlm, MinecraftTopo.Core.Tlm.TlmKind.Tlm3d)
-            : r.LandCover == LandCoverKind.TlmRegio ? new MinecraftTopo.Core.Tlm.TlmLandCoverSource(tlm, MinecraftTopo.Core.Tlm.TlmKind.Regio)
-            : new MinecraftTopo.Core.Water.Vec25LandCoverSource(downloader, paths),
-        r => new MinecraftTopo.Core.Buildings.SwissBuildings3dSource(downloader, paths),
-        r => new MinecraftTopo.Core.Geology.Gk500Source(downloader, paths));
+        DataSources.Swisstopo(downloader, paths, tlm));
     var result = await generator.GenerateAsync(request, progress, cts.Token);
     Console.WriteLine();
     Console.WriteLine($"Done: {result.OutputDir}");
@@ -213,7 +266,7 @@ static int VerifyRegion(string path, string? chunkSpec)
             fs.ReadExactly(pl);
             using var zs = new ZLibStream(new MemoryStream(pl), CompressionMode.Decompress);
             var chunkRoot = new NbtReader(zs).ReadRoot();
-            string dump = chunkRoot.Dump(maxListItems: 100);
+            string dump = chunkRoot.Dump(maxListItems: 300);
             if (!dump.Contains(needle, StringComparison.Ordinal)) continue;
             hits++;
             int entities = chunkRoot["block_entities"]?.Children.Count ?? 0;
@@ -320,7 +373,10 @@ static void PrintHelp()
           --res 2|0.5             swissALTI3D resolution
           --mpb <metres/block>    default 1
           --vscale auto|<n>       vertical scale (blocks per metre)
-          --base-y <y>            default 0
+          --base-y <y>            default -60
+          --height auto|standard|tall   world height; auto (default) = tall up to 2 m per block. Tall = Y -2032..2031 through a data pack
+          --no-lights             no lantern posts along streets in settlements
+          --no-roof-colours       do not pick roof blocks from the orthophoto
           --water <m>             flood below this real elevation
           --building-model swisstopo|footprints   building shapes: swissBUILDINGS3D 3.0 (default) or landscape-model footprints
           --cover tlm3d|regio|vec25   land cover source: swissTLM3D (default), swissTLMRegio or the VECTOR25 map layer
@@ -329,7 +385,19 @@ static void PrintHelp()
           --no-trees              do not plant trees in swisstopo forest areas
           --no-vegetation         no grass, ferns and flowers on grass blocks
           --no-resources          no ores, bee nests, berries, mushrooms, pumpkins, clay or seagrass
-          --no-geology            plain stone instead of GK500 rock types underground
+          --geology gk500|geocover|none   rock types underground (default gk500; geocover = 1:25k sheets where published)
+          --glaciers 1850|1973|2010   build the glaciers of that inventory year (default: today)
+          --no-ice                do not fill today's glaciers with ice down to the modelled bed
+          --no-lake-floors        flat lake beds instead of swissBATHY3D depths
+          --canopy                tree heights and crowns from swissSURFACE3D (about 20 MB per km²)
+          --surface photo|photoblocks|siegfried|dufour|map   colour the ground from the orthophoto or a map
+          --no-names              no peak, pass, field and place name signs from swissNAMES3D
+          --no-extras             no walls, dams, lifts, sports fields, runways and small objects from swissTLM3D
+          --jura3d                underground formation boundaries from the swissJURA3D model (108 MB one-time)
+          --no-wildlife           no cows, sheep, goats, foxes, wolves, frogs, salmon and so on
+          --no-crops              no ripe crops on cropland
+          --mode creative|survival|adventure|hardcore   game mode (default creative)
+          --difficulty peaceful|easy|normal|hard        default peaceful
           --blocks role=block,...  block choices, e.g. asphalt=black_concrete,geo8=calcite (--list-blocks shows roles)
           --snow <m>              snow line, default 2500
           --slope <deg>           stone above this slope, default 32

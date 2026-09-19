@@ -53,8 +53,23 @@
     </label>
     <label>
       Custom metres per block
-      <input type="number" min="0.5" step="0.5" [value]="settings().metresPerBlock" (change)="update('metresPerBlock', number($event) || 1)" />
+      <input type="number" min="0.25" step="0.25" [value]="settings().metresPerBlock" (change)="update('metresPerBlock', number($event) || 1)" />
     </label>
+    @if (settings().metresPerBlock < 1 && settings().alti3dResolution !== 0.5) {
+      <p class="hint">Below 1 m per block the 2 m elevation tiles are interpolated; switch the swissALTI3D resolution to 0.5 m for real half-metre detail (about 40 MB per km²).</p>
+    }
+    <label>
+      World height
+      <select [value]="settings().worldHeight" (change)="update('worldHeight', $any(text($event)))">
+        <option value="auto">Automatic: tall up to 2 m per block, standard above</option>
+        <option value="standard">Standard: 384 blocks (Y -64 to 319), no data pack</option>
+        <option value="tall">Tall: 4064 blocks (Y -2032 to 2031) through a data pack in the world</option>
+      </select>
+    </label>
+    <p class="hint">
+      At 1 m per block the standard height holds about 375 m of relief; steeper areas get squeezed (road cuts and cliffs flatten) or the scale is raised automatically.
+      The tall world keeps 1 m per block for any Swiss relief; the generator writes the data pack and enables it, nothing to install.
+    </p>
     <label>
       Elevation data
       <select [value]="settings().source" (change)="update('source', $any(text($event)))">
@@ -87,7 +102,7 @@
         Blocks per metre
         <input type="number" min="0.01" step="0.05" [value]="settings().verticalScale" [disabled]="settings().verticalScaleMode !== 'manual'" (change)="update('verticalScale', number($event) || 1)" />
       </label>
-      <label>Base Y <input type="number" min="-63" max="300" step="1" [value]="settings().baseY" (change)="update('baseY', int($event))" /></label>
+      <label>Base Y <input type="number" [min]="settings().worldHeight === 'tall' ? -2031 : -63" [max]="settings().worldHeight === 'tall' ? 2000 : 300" step="1" [value]="settings().baseY" (change)="update('baseY', int($event))" /></label>
       <label>Snow line (m) <input type="number" step="50" [value]="settings().snowLine" (change)="update('snowLine', number($event))" /></label>
       <label>Stone above slope (°) <input type="number" min="0" max="90" step="1" [value]="settings().slopeStoneDegrees" (change)="update('slopeStoneDegrees', number($event))" /></label>
       <label class="check">
@@ -125,17 +140,70 @@
       <input type="checkbox" [checked]="settings().waterBodies" (change)="update('waterBodies', checked($event))" />
       Lakes and rivers as water
     </label>
+    <label class="check indent">
+      <input type="checkbox" [checked]="settings().lakeFloors" [disabled]="!settings().waterBodies" (change)="update('lakeFloors', checked($event))" />
+      Real lake floors from swissBATHY3D (22 surveyed lakes; one-time download per lake, 2 MB to 1 GB)
+    </label>
+    <label>
+      Glaciers
+      <select [value]="settings().glacierYear" (change)="update('glacierYear', int($event))">
+        <option [value]="0" [selected]="settings().glacierYear === 0">As today (surveyed surface)</option>
+        <option [value]="2010" [selected]="settings().glacierYear === 2010">As in 2010</option>
+        <option [value]="1973" [selected]="settings().glacierYear === 1973">As in 1973</option>
+        <option [value]="1850" [selected]="settings().glacierYear === 1850">As in 1850 (Little Ice Age maximum)</option>
+      </select>
+    </label>
+    <p class="hint">Past years raise the surface to the glacier inventory of that year (GLAMOS extents; thickness modelled from the distance to the ice margin, up to 900 m).</p>
+    <label class="check indent">
+      <input type="checkbox" [checked]="settings().iceToBed" (change)="update('iceToBed', checked($event))" />
+      Ice down to the modelled bed under today's glaciers (blue ice deep inside)
+    </label>
+    <label>
+      Ground colours
+      <select [value]="settings().surfaceStyle" (change)="update('surfaceStyle', $any(text($event)))">
+        <option value="none">From the land cover classes (default)</option>
+        <option value="photo">swissIMAGE orthophoto: meadow, cropland, bare soil, rock, sand, snow</option>
+        <option value="photoBlocks">swissIMAGE orthophoto draped with coloured blocks</option>
+        <option value="siegfried">Siegfried map (1870-1949) draped over the ground</option>
+        <option value="dufour">Dufour map (1845-1865) draped over the ground</option>
+        <option value="nationalMap">National map draped over the ground</option>
+      </select>
+    </label>
     <ng-container *ngTemplateOutlet="blocks; context: { group: 'terrain', title: 'Terrain blocks' }" />
     <label class="check">
       <input type="checkbox" [checked]="settings().trees" (change)="update('trees', checked($event))" />
       Trees in forests (oak below 1300 m, spruce above, none above the 2100 m tree line)
     </label>
+    <label class="check indent">
+      <input type="checkbox" [checked]="settings().vegetationHeights" [disabled]="!settings().trees || settings().metresPerBlock > 4" (change)="update('vegetationHeights', checked($event))" />
+      Real tree heights and crowns from swissSURFACE3D (one tree per measured crown, also outside forests; about 20 MB per km², up to 4 m/block)
+    </label>
     <ng-container *ngTemplateOutlet="blocks; context: { group: 'trees', title: 'Tree blocks' }" />
-    <label class="check">
-      <input type="checkbox" [checked]="settings().geology" (change)="update('geology', checked($event))" />
-      Rock types from the GK500 geological map (underground and on bare rock; plain stone when off)
+    <label>
+      Rock types underground and on bare rock
+      <select [value]="settings().geology" (change)="update('geology', $any(text($event)))">
+        <option value="gk500">GK500 geological map, 1:500 000 (whole country)</option>
+        <option value="geocover">GeoCover 1:25 000 where published (about 9 MB per sheet), GK500 elsewhere</option>
+        <option value="none">Plain stone</option>
+      </select>
+    </label>
+    <label class="check indent">
+      <input type="checkbox" [checked]="settings().jura3d" [disabled]="settings().geology === 'none'" (change)="update('jura3d', checked($event))" />
+      Underground layers from the swissJURA3D model (Vaud Jura between Geneva and the Vallée de Joux; formation tops as layer boundaries; 108 MB one-time download)
     </label>
     <ng-container *ngTemplateOutlet="blocks; context: { group: 'geology', title: 'Rock type blocks' }" />
+    <label class="check">
+      <input type="checkbox" [checked]="settings().wildlife" (change)="update('wildlife', checked($event))" />
+      Wildlife where it belongs: cows, sheep, pigs, chickens and horses on pastures and next to farms, goats and rabbits in the alpine zone, foxes and wolves in forests, frogs in wetlands, salmon in rivers and lakes, squid in deep lakes (written as entities; biomes are set so natural spawning matches)
+    </label>
+    <label class="check">
+      <input type="checkbox" [checked]="settings().crops" (change)="update('crops', checked($event))" />
+      Ripe wheat, potatoes, carrots and beetroots on cropland (fields from the orthophoto ground mode and allotments)
+    </label>
+    <label class="check">
+      <input type="checkbox" [checked]="settings().placeNames" (change)="update('placeNames', checked($event))" />
+      Name signs from swissNAMES3D: peaks with their height, passes, huts, chapels, waterfalls, springs, fields, valleys, lakes, rivers, lifts, stations (33 MB one-time download)
+    </label>
     <label class="check">
       <input type="checkbox" [checked]="settings().vegetation" (change)="update('vegetation', checked($event))" />
       Grass, ferns and flowers on grass blocks
@@ -150,6 +218,10 @@
         <option value="swissBuildings3d">swissBUILDINGS3D 3.0 (measured heights and real roof shapes)</option>
         <option value="footprints">Footprints from the land cover source (boxes by storeys)</option>
       </select>
+    </label>
+    <label class="check indent">
+      <input type="checkbox" [checked]="settings().roofColours" [disabled]="!settings().buildings" (change)="update('roofColours', checked($event))" />
+      Roof blocks from the swissIMAGE colour of each building (tiles, dark, grey, white or green roofs)
     </label>
     <p class="hint">Churches get stone walls and a slate roof when the land cover source knows them (swissTLM3D or swissTLMRegio); with footprint boxes they also get a tower.</p>
     <ng-container *ngTemplateOutlet="blocks; context: { group: 'buildings', title: 'Building blocks' }" />
@@ -178,6 +250,15 @@
         <input type="checkbox" [checked]="settings().streetSigns" [disabled]="!infrastructureAvailable() || !settings().roads" (change)="update('streetSigns', checked($event))" />
         Street name signs beside named roads, every 120 m (needs Roads)
       </label>
+      <label class="check">
+        <input type="checkbox" [checked]="settings().streetLights" [disabled]="!infrastructureAvailable() || !settings().roads || !settings().buildings" (change)="update('streetLights', checked($event))" />
+        Street lights: lantern posts every 30 m along streets where the surroundings are built up (needs Roads and Buildings)
+      </label>
+      <label class="check">
+        <input type="checkbox" [checked]="settings().extras" [disabled]="settings().landCover !== 'tlm3d'" (change)="update('extras', checked($event))" />
+        Extras (swissTLM3D only): walls, dams and weirs, cable cars and ski lifts with masts, sports fields and running tracks, runways, platforms, jetties, car parks, quarries, allotments, summit crosses, fountains, monuments, shrines, boundary stones
+      </label>
+      <ng-container *ngTemplateOutlet="blocks; context: { group: 'extras', title: 'Extras blocks' }" />
     </div>
     <label class="check">
       <input type="checkbox" [checked]="settings().resources" (change)="update('resources', checked($event))" />
@@ -188,6 +269,29 @@
   <section>
     <h2>4. Output</h2>
     <label>World name <input type="text" [value]="settings().worldName" (change)="update('worldName', text($event))" /></label>
+    <div class="grid2">
+      <label>
+        Game mode
+        <select [value]="settings().gameMode" (change)="update('gameMode', $any(text($event)))">
+          <option value="creative">Creative (commands on)</option>
+          <option value="survival">Survival</option>
+          <option value="adventure">Adventure</option>
+          <option value="hardcore">Hardcore (one life, hard)</option>
+        </select>
+      </label>
+      <label>
+        Difficulty
+        <select [value]="settings().difficulty" [disabled]="settings().gameMode === 'hardcore'" (change)="update('difficulty', $any(text($event)))">
+          <option value="peaceful">Peaceful (no hostile mobs)</option>
+          <option value="easy">Easy</option>
+          <option value="normal">Normal</option>
+          <option value="hard">Hard</option>
+        </select>
+      </label>
+    </div>
+    @if (settings().gameMode !== 'creative' && settings().difficulty === 'peaceful') {
+      <p class="hint">Peaceful never spawns hostile mobs and refills hunger; pick easy or normal for a real survival game.</p>
+    }
     <label>
       Output
       <select [value]="settings().outputMode" (change)="update('outputMode', $any(text($event)))">
@@ -259,6 +363,78 @@
       </h2>
       <div class="bar"><div class="fill" [style.width.%]="progressPercent()"></div></div>
       <p class="phase">{{ j.progress.phase }} · {{ j.progress.message }}</p>
+      @if (j.mapUrl) {
+        <ng-template #stageChips>
+          <div class="stages" (click)="$event.stopPropagation()">
+            @for (s of j.mapStages; track s) {
+              <button type="button" class="chip" [class.active]="stageShown(j) === s" [class.pending]="isPending(s)" (click)="selectStage(s, j)">{{ s }}</button>
+            }
+            @if (j.chunkMask && !fullscreen()) {
+              <span class="chip static">chunks {{ chunksDone(j) }} / {{ j.chunksWide * j.chunksHigh }}</span>
+            }
+            <button type="button" class="chip" (click)="fullscreen.set(!fullscreen())">{{ fullscreen() ? 'Close' : 'Full screen' }}</button>
+          </div>
+        </ng-template>
+        @if (!fullscreen()) {
+          <ng-container *ngTemplateOutlet="stageChips" />
+        }
+        <div
+          class="worldmap"
+          [class.full]="fullscreen()"
+          [class.editable]="j.spawnEditable"
+          [class.dragging]="dragActive()"
+          (click)="mapClick($event, j)"
+          (wheel)="onWheel($event)"
+          (mousedown)="dragStart($event)"
+          (mousemove)="dragMove($event)"
+          (mouseup)="dragEnd()"
+          (mouseleave)="dragEnd()"
+          title="Click to move the spawn point; in full screen scroll to zoom and drag to pan"
+        >
+          @if (fullscreen()) {
+            <aside class="logs" (click)="$event.stopPropagation()" (mousedown)="$event.stopPropagation()" (wheel)="$event.stopPropagation()">
+              <div class="loghead">{{ j.worldName }} · {{ j.state }} · {{ j.progress.phase }}</div>
+              <div class="loglines">
+                @for (line of logLinesReversed(); track $index) {
+                  <span class="line">{{ line }}</span>
+                }
+              </div>
+            </aside>
+          }
+          <div class="viewport">
+          @if (fullscreen()) {
+            <div class="topbar">
+              <ng-container *ngTemplateOutlet="stageChips" />
+            </div>
+            <div class="caption"><b>{{ j.worldName }}</b> · {{ stageShown(j) }} · {{ j.progress.message }} · scroll to zoom, drag to pan, arrow keys, 0 resets, Esc closes</div>
+          }
+          <div class="frame" [style.transform]="frameTransform()">
+            @if (previousSrc(); as prev) {
+              <img class="under" [src]="prev" alt="" />
+            }
+            @for (src of [mapSrc(j)]; track src) {
+              <img class="fade" [src]="src" alt="Map of the generated world" (load)="shown(src)" />
+            }
+            @if (chunkOverlay(); as ov) {
+              <img class="chunkmask" [src]="ov" alt="" />
+            }
+            @if (j.spawnX !== null && j.spawnZ !== null) {
+              <div class="spawn-marker" [style.left.%]="(100 * (j.spawnX + 0.5)) / j.blocksWide" [style.top.%]="(100 * (j.spawnZ + 0.5)) / j.blocksHigh">S</div>
+            }
+          </div>
+          </div>
+        </div>
+        <p class="hint">
+          @if (j.spawnEditable) {
+            Click on the map to move the spawn point.
+          } @else if (j.state === 'done') {
+            The world has been opened in Minecraft; change the spawn in the game with /setworldspawn.
+          }
+          @if (spawnInfo(j); as sp) {
+            Spawn: block X {{ sp.x }}, Y {{ sp.y }}, Z {{ sp.z }} (E {{ sp.e | number: '1.0-0' }}, N {{ sp.n | number: '1.0-0' }}).
+          }
+        </p>
+      }
       @if (j.result; as r) {
         <table>
           <tr><td>Folder</td><td class="path">{{ r.outputDir }}</td></tr>

@@ -40,3 +40,7 @@ body {
 .leaflet-container {
   font-family: inherit;
 }
+
+.world-overlay {
+  image-rendering: pixelated;
+}

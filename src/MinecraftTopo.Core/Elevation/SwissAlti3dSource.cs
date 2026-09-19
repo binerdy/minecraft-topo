@@ -12,28 +12,42 @@ namespace MinecraftTopo.Core.Elevation;
 /// </summary>
 public sealed class SwissAlti3dSource : IElevationSource
 {
-    public const string StacItemsUrl = "https://data.geo.admin.ch/api/stac/v0.9/collections/ch.swisstopo.swissalti3d/items";
+    public const string Alti3dCollection = "ch.swisstopo.swissalti3d";
+    public const string Surface3dCollection = "ch.swisstopo.swisssurface3d-raster";
     private const int MaxParallelDownloads = 4;
 
     private readonly Downloader _downloader;
     private readonly string _cacheDir;
+    private readonly string _collection;
+    private readonly string _displayName;
+
+    public string StacItemsUrl => $"https://data.geo.admin.ch/api/stac/v0.9/collections/{_collection}/items";
 
     /// <summary>Tile resolution in metres: 2 or 0.5.</summary>
     public double Resolution { get; }
 
     public SwissAlti3dSource(Downloader downloader, AppPaths paths, double resolution = 2)
+        : this(downloader, paths.Alti3dCacheDir, resolution, Alti3dCollection, "swissALTI3D") { }
+
+    private SwissAlti3dSource(Downloader downloader, string cacheDir, double resolution, string collection, string displayName)
     {
-        if (resolution != 2 && resolution != 0.5) throw new ArgumentOutOfRangeException(nameof(resolution), "swissALTI3D is available at 2 m or 0.5 m.");
+        if (resolution != 2 && resolution != 0.5) throw new ArgumentOutOfRangeException(nameof(resolution), "Tiles are available at 2 m or 0.5 m.");
         _downloader = downloader;
-        _cacheDir = paths.Alti3dCacheDir;
+        _cacheDir = cacheDir;
+        _collection = collection;
+        _displayName = displayName;
         Resolution = resolution;
     }
 
-    public string Name => $"swissALTI3D {Resolution:0.#} m";
+    /// <summary>swissSURFACE3D Raster: the surface model including vegetation and buildings (0.5 m, about 20 MB per km²).</summary>
+    public static SwissAlti3dSource Surface3d(Downloader downloader, AppPaths paths) =>
+        new(downloader, paths.Surface3dCacheDir, 0.5, Surface3dCollection, "swissSURFACE3D");
+
+    public string Name => $"{_displayName} {Resolution:0.#} m";
     public double NativeResolution => Resolution;
 
     /// <summary>Rough size of one zipped XYZ tile.</summary>
-    public long EstimatedTileBytes => Resolution == 2 ? 2_500_000 : 40_000_000;
+    public long EstimatedTileBytes => _collection == Surface3dCollection ? 20_000_000 : Resolution == 2 ? 2_500_000 : 40_000_000;
 
     public sealed record TileInfo(string Key, int EKm, int NKm, int Year, string Url)
     {
@@ -75,11 +89,11 @@ public sealed class SwissAlti3dSource : IElevationSource
                 foreach (var feature in features.EnumerateArray())
                 {
                     string id = feature.GetProperty("id").GetString() ?? "";
-                    // id: swissalti3d_<year>_<Ekm>-<Nkm>
+                    // id: swissalti3d_<year>_<Ekm>-<Nkm> (also swisssurface3d-raster_<year>_<Ekm>-<Nkm>)
                     var parts = id.Split('_');
                     if (parts.Length < 3) continue;
-                    if (!int.TryParse(parts[1], out int year)) continue;
-                    var km = parts[2].Split('-');
+                    if (!int.TryParse(parts[^2], out int year)) continue;
+                    var km = parts[^1].Split('-');
                     if (km.Length != 2 || !int.TryParse(km[0], out int ekm) || !int.TryParse(km[1], out int nkm)) continue;
                     var tileRect = new Lv95Rect(ekm * 1000, nkm * 1000, ekm * 1000 + 1000, nkm * 1000 + 1000);
                     if (!tileRect.Intersects(rect)) continue;
@@ -98,7 +112,7 @@ public sealed class SwissAlti3dSource : IElevationSource
                     }
                     if (href is null) continue;
 
-                    string key = parts[2];
+                    string key = parts[^1];
                     if (!best.TryGetValue(key, out var existing) || existing.Year < year)
                     {
                         best[key] = new TileInfo(key, ekm, nkm, year, href);
@@ -128,11 +142,11 @@ public sealed class SwissAlti3dSource : IElevationSource
         // Only tiles that contain a cell centre are needed: bilinear sampling clamps at tile edges,
         // which costs at most half a 2 m cell of accuracy along tile seams.
         var rect = new Lv95Rect(grid.MinE, grid.MinN, grid.MaxE, grid.MaxN);
-        progress?.Report(new ProgressInfo("tiles", 0, "Looking up swissALTI3D tiles"));
+        progress?.Report(new ProgressInfo("tiles", 0, $"Looking up {_displayName} tiles"));
         var tiles = await FindTilesAsync(rect, ct);
         if (tiles.Count == 0)
         {
-            throw new InvalidOperationException("No swissALTI3D tiles cover the selected area. Is it inside Switzerland?");
+            throw new InvalidOperationException($"No {_displayName} tiles cover the selected area. Is it inside Switzerland?");
         }
         progress?.Report(new ProgressInfo("tiles", 100, $"{tiles.Count} tiles cover the area", 0, tiles.Count));
 
@@ -192,6 +206,12 @@ public sealed class SwissAlti3dSource : IElevationSource
         using var zip = ZipFile.OpenRead(zipPath);
         var entry = zip.Entries.FirstOrDefault(e => e.Name.EndsWith(".xyz", StringComparison.OrdinalIgnoreCase))
                     ?? throw new InvalidDataException($"No .xyz entry in {Path.GetFileName(zipPath)}.");
+        return ParseXyzEntry(entry, resolution, ct) ?? throw new InvalidDataException($"{Path.GetFileName(zipPath)} contains no points.");
+    }
+
+    /// <summary>Parses one XYZ entry into a grid; null when it holds no points.</summary>
+    internal static HeightGrid? ParseXyzEntry(ZipArchiveEntry entry, double resolution, CancellationToken ct)
+    {
 
         // First pass: read all points into arrays (a 2 m tile has 250k points, a 0.5 m tile 4M).
         var es = new List<float>(1 << 18);
@@ -218,7 +238,7 @@ public sealed class SwissAlti3dSource : IElevationSource
                 if (n < minN) minN = n; if (n > maxN) maxN = n;
             }
         }
-        if (hs.Count == 0) throw new InvalidDataException($"{Path.GetFileName(zipPath)} contains no points.");
+        if (hs.Count == 0) return null;
 
         int width = (int)Math.Round((maxE - minE) / resolution) + 1;
         int height = (int)Math.Round((maxN - minN) / resolution) + 1;

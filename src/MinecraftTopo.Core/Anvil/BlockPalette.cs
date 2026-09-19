@@ -9,7 +9,7 @@ public sealed record BlockRole(string Key, string Label, string Group, byte Id, 
 public static class BlockRoles
 {
     public const string Terrain = "terrain", Trees = "trees", Roads = "roads", Rails = "rails",
-        Buildings = "buildings", Power = "power", Geology = "geology";
+        Buildings = "buildings", Power = "power", Geology = "geology", Extras = "extras";
 
     public static readonly IReadOnlyList<BlockRole> All =
     [
@@ -26,6 +26,28 @@ public static class BlockRoles
         new("forest_floor", "Forest floor at coarse scales", Terrain, Blocks.MossBlock, "moss_block"),
         new("water", "Water", Terrain, Blocks.Water, "water"),
         new("bedrock", "Bottom layer", Terrain, Blocks.Bedrock, "bedrock"),
+        new("blue_ice", "Deep glacier ice (more than 40 blocks down)", Terrain, Blocks.BlueIce, "blue_ice"),
+        new("farmland", "Cropland and allotments", Terrain, Blocks.Farmland, "farmland"),
+        new("coarse_dirt", "Bare soil, landfills", Terrain, Blocks.CoarseDirt, "coarse_dirt"),
+        new("podzol", "Cemeteries and dark ground", Terrain, Blocks.Podzol, "podzol"),
+
+        new("wall", "Walls and dry-stone walls", Extras, Blocks.CobblestoneWall, "cobblestone_wall"),
+        new("dam", "Dams, weirs and basin rims", Extras, Blocks.DamWall, "stone_bricks"),
+        new("barrier", "Avalanche and rockfall barriers", Extras, Blocks.Barrier, "iron_bars"),
+        new("bank_wall", "River bank revetments", Extras, Blocks.BankWall, "stone_bricks"),
+        new("runway", "Runways and taxiways", Extras, Blocks.Runway, "gray_concrete"),
+        new("platform", "Station platforms", Extras, Blocks.Platform, "smooth_stone"),
+        new("parking", "Car parks and rest areas", Extras, Blocks.Parking, "light_gray_concrete"),
+        new("lift_mast", "Cable car and ski lift masts", Extras, Blocks.LiftMast, "iron_bars"),
+        new("running_track", "Running tracks", Extras, Blocks.RunningTrack, "red_terracotta"),
+        new("sports_line", "Sports field lines", Extras, Blocks.SportsLine, "white_concrete"),
+        new("jetty", "Jetties and piers", Extras, Blocks.Jetty, "oak_planks"),
+        new("monument", "Monuments", Extras, Blocks.Monument, "chiseled_stone_bricks"),
+        new("lantern", "Wayside shrine lanterns", Extras, Blocks.Lantern, "lantern"),
+        new("quarry", "Quarries and gravel pits", Extras, Blocks.Quarry, "stone"),
+        new("lamp_post", "Street lamp posts", Extras, Blocks.StreetLamp, "oak_fence"),
+        new("tunnel_light", "Tunnel ceiling lights and mast lights", Extras, Blocks.Glowstone, "glowstone"),
+        new("bridge_roof", "Covered bridge roofs", Extras, Blocks.RoofPlanks, "spruce_planks"),
 
         new("oak_log", "Oak trunk (below 1300 m)", Trees, Blocks.OakLog, "oak_log"),
         new("oak_leaves", "Oak leaves", Trees, Blocks.OakLeaves, "oak_leaves"),
@@ -51,6 +73,10 @@ public static class BlockRoles
         new("window", "Windows", Buildings, Blocks.Glass, "glass"),
         new("church_wall", "Church walls", Buildings, Blocks.ChurchWall, "stone_bricks"),
         new("church_roof", "Church roofs and spires", Buildings, StructureBlocks.DeepslateTiles, "deepslate_tiles"),
+        new("roof_dark", "Dark roofs seen in the orthophoto", Buildings, Blocks.DarkRoof, "deepslate_tiles"),
+        new("roof_light", "Grey roofs seen in the orthophoto", Buildings, Blocks.LightRoof, "light_gray_concrete"),
+        new("roof_white", "White roofs seen in the orthophoto", Buildings, Blocks.WhiteRoof, "smooth_quartz"),
+        new("tank", "Storage tanks", Buildings, Blocks.IronBlock, "iron_block"),
 
         new("pylon", "Pylons", Power, StructureBlocks.IronBars, "iron_bars"),
         new("pole", "Wooden poles", Power, StructureBlocks.OakFence, "oak_fence"),
@@ -112,6 +138,8 @@ public static class BlockRoles
             "hay_block", "bone_block", "honeycomb_block", "honey_block", "slime_block", "sponge", "wet_sponge", "sculk", "magma_block",
             "soul_sand", "soul_soil", "warped_nylium", "crimson_nylium", "nether_bricks", "red_nether_bricks", "purpur_block", "bookshelf", "note_block",
             "iron_bars", "oak_fence", "spruce_fence", "birch_fence", "dark_oak_fence", "nether_brick_fence",
+            "cobblestone_wall", "mossy_cobblestone_wall", "stone_brick_wall", "andesite_wall", "granite_wall", "diorite_wall", "deepslate_brick_wall",
+            "lantern", "soul_lantern", "farmland", "chiseled_stone_bricks", "chiseled_deepslate", "chiseled_sandstone",
         };
         foreach (var w in new[] { "oak", "spruce", "birch", "jungle", "acacia", "dark_oak", "mangrove", "cherry", "pale_oak", "bamboo", "crimson", "warped" })
         {
@@ -173,6 +201,7 @@ public sealed class BlockPalette
     {
         warnings = [];
         var names = new string[Blocks.Names.Length + Blocks.ExtraNames.Length];
+        if (names.Length != Blocks.LastId + 1) throw new InvalidOperationException($"Block name table has {names.Length} entries but the last id is {Blocks.LastId}.");
         Blocks.Names.CopyTo(names, 0);
         Blocks.ExtraNames.CopyTo(names, Blocks.Names.Length);
         var props = new Dictionary<byte, (string, string)[]>();

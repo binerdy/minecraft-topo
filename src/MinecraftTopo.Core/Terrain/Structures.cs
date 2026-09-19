@@ -40,6 +40,10 @@ public static class StructurePlanner
     /// <summary>Horizontal reach of a structure in blocks (for indexing).</summary>
     public static int Reach(StructureKind kind, double mpb) => kind == StructureKind.WindTurbine ? BladeLength(mpb) + 2 : 3;
 
+    /// <summary>Wire height above ground at a wire end: pylons and poles by voltage, lifts by their mast height.</summary>
+    public static int WireHeight(Wire wire, double mpb, int headroom) =>
+        wire.HeightMetres > 0 ? Math.Max(2, Math.Min((int)Math.Round(wire.HeightMetres / mpb), headroom - 1)) : LineHeight(wire.HighVoltage, mpb, headroom);
+
     /// <summary>Church tower height in blocks: twice the nave, at least 12 m.</summary>
     public static int ChurchTowerHeight(int naveHeight, double mpb) => Math.Max(naveHeight * 2, (int)Math.Round(12 / mpb));
 
@@ -90,6 +94,84 @@ public static class StructurePlanner
             {
                 int hgt = LineHeight(false, mpb, headroom);
                 for (int y = 1; y <= hgt; y++) place(s.X, s.Z, y, StructureBlocks.OakFence);
+                break;
+            }
+            case StructureKind.LiftMast:
+            {
+                int hgt = Math.Max(2, Math.Min((int)Math.Round(s.Size / mpb), headroom - 1));
+                for (int y = 1; y <= hgt; y++) place(s.X, s.Z, y, StructureBlocks.LiftMast);
+                bool alongX = Math.Abs(s.DirX) >= Math.Abs(s.DirZ);
+                for (int d = -1; d <= 1; d++)
+                {
+                    if (alongX) place(s.X, s.Z + d, hgt, StructureBlocks.LiftMast);
+                    else place(s.X + d, s.Z, hgt, StructureBlocks.LiftMast);
+                }
+                break;
+            }
+            case StructureKind.SummitCross:
+            {
+                if (headroom < 4) break;
+                place(s.X, s.Z, 1, StructureBlocks.IronBars);
+                place(s.X, s.Z, 2, StructureBlocks.IronBars);
+                place(s.X - 1, s.Z, 2, StructureBlocks.IronBars);
+                place(s.X + 1, s.Z, 2, StructureBlocks.IronBars);
+                place(s.X, s.Z, 3, StructureBlocks.IronBars);
+                break;
+            }
+            case StructureKind.Fountain:
+            {
+                if (headroom < 2) break;
+                for (int dz = -1; dz <= 1; dz++)
+                    for (int dx = -1; dx <= 1; dx++)
+                        place(s.X + dx, s.Z + dz, 1, dx == 0 && dz == 0 ? StructureBlocks.Water : StructureBlocks.StoneBricks);
+                place(s.X, s.Z, 2, StructureBlocks.StoneBricks);
+                break;
+            }
+            case StructureKind.Monument:
+            {
+                int hgt = Math.Min(3, headroom - 1);
+                for (int y = 1; y <= hgt; y++) place(s.X, s.Z, y, StructureBlocks.Monument);
+                if (hgt + 1 < headroom) place(s.X, s.Z, hgt + 1, StructureBlocks.SmoothQuartz);
+                break;
+            }
+            case StructureKind.Shrine:
+            {
+                if (headroom < 3) break;
+                place(s.X, s.Z, 1, StructureBlocks.OakFence);
+                place(s.X, s.Z, 2, StructureBlocks.OakFence);
+                place(s.X, s.Z, 3, StructureBlocks.Lantern);
+                break;
+            }
+            case StructureKind.Antenna:
+            {
+                int hgt = Math.Max(3, Math.Min((int)Math.Round(s.Size / mpb), headroom - 2));
+                for (int y = 1; y <= hgt; y++) place(s.X, s.Z, y, StructureBlocks.IronBars);
+                if (s.Size >= 30)
+                {
+                    // lattice mast: a wider base
+                    for (int y = 1; y <= Math.Min(3, hgt); y++) { place(s.X + 1, s.Z, y, StructureBlocks.IronBars); place(s.X - 1, s.Z, y, StructureBlocks.IronBars); place(s.X, s.Z + 1, y, StructureBlocks.IronBars); place(s.X, s.Z - 1, y, StructureBlocks.IronBars); }
+                }
+                place(s.X, s.Z, hgt + 1, StructureBlocks.Glowstone);
+                break;
+            }
+            case StructureKind.BusShelter:
+            {
+                if (headroom < 5) break;
+                bool alongX = Math.Abs(s.DirX) >= Math.Abs(s.DirZ);
+                for (int y = 1; y <= 3; y++)
+                {
+                    if (alongX) { place(s.X - 1, s.Z, y, StructureBlocks.IronBars); place(s.X + 1, s.Z, y, StructureBlocks.IronBars); }
+                    else { place(s.X, s.Z - 1, y, StructureBlocks.IronBars); place(s.X, s.Z + 1, y, StructureBlocks.IronBars); }
+                }
+                for (int a = -1; a <= 1; a++)
+                    for (int b = 0; b <= 1; b++)
+                        place(alongX ? s.X + a : s.X + b, alongX ? s.Z + b : s.Z + a, 4, StructureBlocks.Platform);
+                break;
+            }
+            case StructureKind.Marker:
+            {
+                if (headroom < 2) break;
+                place(s.X, s.Z, 1, StructureBlocks.CobblestoneWall);
                 break;
             }
             case StructureKind.WindTurbine:
@@ -162,14 +244,33 @@ public static class StructureBlocks
     public const byte DeepslateTiles = 73;
     public const byte LightGrayConcrete = 59; // same as Anvil.Blocks.LightGrayConcrete
     public const byte StoneBricks = 61;       // same as Anvil.Blocks.StoneBricks
+    public const byte Water = 8;              // same as Anvil.Blocks.Water
+    public const byte LiftMast = 129;         // same as Anvil.Blocks.LiftMast
+    public const byte Lantern = 130;
+    public const byte Monument = 133;
+    public const byte CobblestoneWall = 124;
+    public const byte Platform = 127;
+    public const byte Glowstone = 236;        // same as Anvil.Blocks.Glowstone
 }
 
 /// <summary>Where villagers stand: on the ground next to a house.</summary>
-public readonly record struct VillagerSpawn(int X, int Y, int Z, float Yaw);
+public readonly record struct VillagerSpawn(int X, int Y, int Z, float Yaw, string Profession = "none");
 
 public static class VillagerPlanner
 {
     public const int MaxVillagers = 4000;
+    private static readonly string[] TownTrades = ["librarian", "cartographer", "butcher", "armorer", "weaponsmith", "leatherworker", "fletcher", "cleric", "mason", "toolsmith"];
+    private static readonly string[] VillageTrades = ["farmer", "farmer", "shepherd", "butcher", "fisherman", "nitwit", "none", "librarian", "mason", "leatherworker"];
+    private static readonly string[] RuralTrades = ["farmer", "farmer", "farmer", "shepherd", "shepherd", "fisherman", "nitwit"];
+
+    /// <summary>Trade by building flags and the built-over fraction of the surroundings.</summary>
+    public static string Profession(byte flags, float builtFraction, uint hash)
+    {
+        if ((flags & BuildingFlag.Church) != 0) return "cleric";
+        if ((flags & BuildingFlag.Industrial) != 0) return hash % 2 == 0 ? "toolsmith" : "mason";
+        var pool = builtFraction < 0.08f ? RuralTrades : builtFraction > 0.25f ? TownTrades : VillageTrades;
+        return pool[hash % (uint)pool.Length];
+    }
 
     /// <summary>One villager next to roughly 60 % of non-industrial buildings with at least 20 footprint cells.</summary>
     public static List<VillagerSpawn> Plan(ClassifiedTerrain t, LandCover cover, long seed)
@@ -200,6 +301,8 @@ public static class VillagerPlanner
             }
         }
 
+        // how built-up the surroundings are decides the trade: farms outside, shops in town centres
+        var built = t.BuildingHeight is null ? null : GridStats.BoxFraction(t.BuildingHeight, w, h, Math.Clamp((int)Math.Round(80 / Math.Max(0.5, t.MetresPerBlock)), 2, 80), CancellationToken.None);
         foreach (var (id, cell) in candidate)
         {
             if (cells[id] < 20) continue;
@@ -207,7 +310,9 @@ public static class VillagerPlanner
             if (hash % 100 >= 60) continue;
             int x = cell % w, z = cell / w;
             int y = t.ColumnTop(x, z) + 1;
-            result.Add(new VillagerSpawn(x, y, z, (hash >> 8) % 360));
+            byte flags = cover.BuildingFlags![cell];
+            string profession = Profession(flags, built?[cell] ?? 0, hash >> 16);
+            result.Add(new VillagerSpawn(x, y, z, (hash >> 8) % 360, profession));
             if (result.Count >= MaxVillagers) break;
         }
         return result;

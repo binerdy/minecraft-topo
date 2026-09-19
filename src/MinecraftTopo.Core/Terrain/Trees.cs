@@ -101,6 +101,62 @@ public static class TreePlanner
         return map;
     }
 
+    /// <summary>
+    /// Plants one tree per crown found in the surface model: a local maximum of the canopy height at
+    /// least 4 m tall (3 m inside mapped forests), on free grass cells, with the trunk height taken
+    /// from the measured canopy. Works inside and outside mapped forests, so clearings stay open and
+    /// hedges, garden and park trees appear where they really are.
+    /// </summary>
+    public static TreeMap PlanFromCanopy(HeightGrid grid, ClassifiedTerrain terrain, bool[] forest, float[] canopy, double verticalScale, double metresPerBlock, long seed, byte[]? coverClass)
+    {
+        var map = new TreeMap();
+        int w = grid.Width, h = grid.Height;
+        int r = Math.Max(1, (int)Math.Round(3.0 / metresPerBlock)); // crown radius in cells
+        var taken = new bool[w * h];
+        for (int z = 2; z < h - 2; z++)
+        {
+            for (int x = 2; x < w - 2; x++)
+            {
+                int i = z * w + x;
+                float c = canopy[i];
+                float min = forest[i] ? 3f : 4f;
+                if (c < min || taken[i]) continue;
+                if (terrain.Kind[i] != Surface.Grass && terrain.Kind[i] != Surface.Vineyard) continue;
+                if (terrain.IsOccupied(i)) continue;
+                if (grid.Data[i] >= TreeLine) continue;
+                // local maximum within the crown radius
+                bool isMax = true;
+                for (int dz = -r; dz <= r && isMax; dz++)
+                    for (int dx = -r; dx <= r; dx++)
+                    {
+                        if (dx == 0 && dz == 0) continue;
+                        int nx = x + dx, nz = z + dz;
+                        if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue;
+                        float nc = canopy[nz * w + nx];
+                        if (nc > c || (nc == c && (dz < 0 || (dz == 0 && dx < 0)))) { isMax = false; break; }
+                    }
+                if (!isMax) continue;
+                // no trunks right next to roads, rails and buildings
+                if (terrain.IsOccupied(i - 1) || terrain.IsOccupied(i + 1) || terrain.IsOccupied(i - w) || terrain.IsOccupied(i + w)) continue;
+
+                uint hash = Hash(x, z, seed);
+                float elev = grid.Data[i];
+                bool orchard = coverClass is not null && coverClass[i] == (byte)Water.CoverClass.Orchard;
+                bool spruce = !orchard && (elev > 1300 || (forest[i] && (hash >> 16) % 3 == 0));
+                int trunk = Math.Clamp((int)Math.Round(c * verticalScale) - 1, 3, 60);
+                map.Add(new Tree(x, z, spruce ? TreeType.Spruce : TreeType.Oak, (byte)trunk));
+                // keep neighbouring crowns apart
+                for (int dz = -r; dz <= r; dz++)
+                    for (int dx = -r; dx <= r; dx++)
+                    {
+                        int nx = x + dx, nz = z + dz;
+                        if (nx >= 0 && nz >= 0 && nx < w && nz < h) taken[nz * w + nx] = true;
+                    }
+            }
+        }
+        return map;
+    }
+
     /// <summary>Calls <paramref name="place"/> for every block of the tree: (x, z, yAboveColumnTop, isLog).</summary>
     public static void Rasterize(Tree t, Action<int, int, int, bool> place)
     {

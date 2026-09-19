@@ -2,7 +2,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, firstValueFrom } from 'rxjs';
 import { Lv95Rect } from '../geo/lv95';
-import { BlocksInfo, DatasetStatus, DatasetsStatus, Defaults, Estimate, JobDto, JobRequest, OverviewStatus, RegionInfo, RegionLevel, SourceKind } from './models';
+import { BlocksInfo, SearchResult, DatasetStatus, DatasetsStatus, Defaults, Estimate, JobDto, JobRequest, OverviewStatus, RegionInfo, RegionLevel, SourceKind } from './models';
 
 export interface EstimateParams {
   area: Lv95Rect;
@@ -11,6 +11,10 @@ export interface EstimateParams {
   alti3dResolution: number;
   baseY: number;
   verticalScale: number | null;
+  lakeFloors: boolean;
+  canopy: boolean;
+  names: boolean;
+  height: string;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -43,11 +47,16 @@ export class ApiService {
       .set('res', p.alti3dResolution)
       .set('baseY', p.baseY);
     if (p.verticalScale != null) params = params.set('vscale', p.verticalScale);
+    params = params.set('lakeFloors', p.lakeFloors).set('canopy', p.canopy).set('names', p.names).set('height', p.height);
     return firstValueFrom(this.http.get<Estimate>('/api/estimate', { params }));
   }
 
   createJob(body: JobRequest): Promise<JobDto> {
     return firstValueFrom(this.http.post<JobDto>('/api/jobs', body));
+  }
+
+  setJobSpawn(id: string, x: number, z: number): Promise<JobDto> {
+    return firstValueFrom(this.http.post<JobDto>(`/api/jobs/${id}/spawn`, { x, z }));
   }
 
   cancelJob(id: string): Promise<void> {
@@ -69,6 +78,11 @@ export class ApiService {
   getRegion(e: number, n: number, level: RegionLevel): Promise<RegionInfo> {
     const params = new HttpParams().set('e', e.toFixed(1)).set('n', n.toFixed(1)).set('level', level);
     return firstValueFrom(this.http.get<RegionInfo>('/api/region', { params }));
+  }
+
+  search(q: string): Promise<SearchResult[]> {
+    const params = new HttpParams().set('q', q);
+    return firstValueFrom(this.http.get<SearchResult[]>('/api/search', { params }));
   }
 
   getDatasets(): Promise<DatasetsStatus> {

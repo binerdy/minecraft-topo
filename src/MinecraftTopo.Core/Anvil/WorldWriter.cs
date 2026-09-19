@@ -10,6 +10,71 @@ namespace MinecraftTopo.Core.Anvil;
 /// </summary>
 public static class WorldWriter
 {
+    public const string TallWorldPackName = "tall_world";
+
+    /// <summary>Writes icon.png, shown in the world list.</summary>
+    public static void WriteIcon(string worldDir, byte[] png) => File.WriteAllBytes(Path.Combine(worldDir, "icon.png"), png);
+
+    /// <summary>True once the game has saved the world (a player data folder with content or session.lock).</summary>
+    public static bool WasPlayed(string worldDir)
+    {
+        string players = Path.Combine(worldDir, "playerdata");
+        return (Directory.Exists(players) && Directory.EnumerateFiles(players).Any()) || File.Exists(Path.Combine(worldDir, "session.lock"));
+    }
+
+    /// <summary>
+    /// Writes the data pack that overrides the overworld dimension type with the tall height
+    /// (Y -2032..2031). The JSON is the vanilla 26.3 overworld definition with min_y, height,
+    /// logical_height and the cloud height changed; level.dat enables the pack as "file/tall_world".
+    /// </summary>
+    public static void WriteTallWorldDataPack(string worldDir, int minY, int height, int cloudHeight)
+    {
+        string packDir = Path.Combine(worldDir, "datapacks", TallWorldPackName);
+        Directory.CreateDirectory(Path.Combine(packDir, "data", "minecraft", "dimension_type"));
+        File.WriteAllText(Path.Combine(packDir, "pack.mcmeta"), "{\n  \"pack\": {\n    \"description\": \"Minecraft Topo: tall overworld (Y -2032..2031) for 1 m per block relief\",\n    \"min_format\": 121,\n    \"max_format\": 200\n  }\n}\n");
+        string json = OverworldDimensionType
+            .Replace("__MIN_Y__", minY.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .Replace("__HEIGHT__", height.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .Replace("__CLOUDS__", cloudHeight.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        File.WriteAllText(Path.Combine(packDir, "data", "minecraft", "dimension_type", "overworld.json"), json);
+    }
+
+    // Copied from the 26.3 jar (data/minecraft/dimension_type/overworld.json) with placeholders.
+    private const string OverworldDimensionType = """
+        {
+          "ambient_light": 0.0,
+          "attributes": {
+            "minecraft:audio/ambient_sounds": {
+              "mood": { "block_search_extent": 8, "offset": 2.0, "sound": "minecraft:ambient.cave", "tick_delay": 6000 }
+            },
+            "minecraft:audio/background_music": {
+              "creative": { "max_delay": 24000, "min_delay": 12000, "sound": "minecraft:music.creative" },
+              "default": { "max_delay": 24000, "min_delay": 12000, "sound": "minecraft:music.game" }
+            },
+            "minecraft:gameplay/bed_rule": { "can_set_spawn": "always", "can_sleep": "when_dark", "error_message": { "translate": "block.minecraft.bed.no_sleep" } },
+            "minecraft:gameplay/nether_portal_spawns_piglin": true,
+            "minecraft:gameplay/respawn_anchor_works": false,
+            "minecraft:gameplay/straw_bed_rule": { "can_set_spawn": "never", "can_sleep": "when_dark", "destroy_on_leave": true, "error_message": { "translate": "block.minecraft.bed.no_sleep" } },
+            "minecraft:visual/ambient_light_color": "#0a0a0a",
+            "minecraft:visual/cloud_color": "#ccffffff",
+            "minecraft:visual/cloud_height": __CLOUDS__,
+            "minecraft:visual/fog_color": "#c0d8ff",
+            "minecraft:visual/sky_color": "#78a7ff"
+          },
+          "coordinate_scale": 1.0,
+          "default_clock": "minecraft:overworld",
+          "has_ceiling": false,
+          "has_ender_dragon_fight": false,
+          "has_skylight": true,
+          "height": __HEIGHT__,
+          "infiniburn": "#minecraft:infiniburn_overworld",
+          "logical_height": __HEIGHT__,
+          "min_y": __MIN_Y__,
+          "monster_spawn_block_light_limit": 0,
+          "monster_spawn_light_level": { "type": "minecraft:uniform", "max_inclusive": 7, "min_inclusive": 0 },
+          "timelines": "#minecraft:in_overworld"
+        }
+        """;
     public const string VersionName = "26.3";
     public const int DataVersion = ChunkBuilder.DataVersion;
 
@@ -62,12 +127,13 @@ public static class WorldWriter
     }
 
     /// <summary>Writes level.dat unless it exists. Returns true when written.</summary>
-    public static bool WriteLevelDatIfMissing(string worldDir, string levelName, int spawnX, int spawnY, int spawnZ, long seed)
+    public static bool WriteLevelDatIfMissing(string worldDir, string levelName, int spawnX, int spawnY, int spawnZ, long seed,
+        GameMode gameMode = GameMode.Creative, Difficulty difficulty = Difficulty.Peaceful, bool tallWorld = false, bool overwrite = false)
     {
         string path = LevelDatPath(worldDir);
-        if (File.Exists(path)) return false;
+        if (File.Exists(path) && !overwrite) return false;
 
-        using var fs = new FileStream(path, FileMode.CreateNew, FileAccess.Write);
+        using var fs = new FileStream(path, FileMode.Create, FileAccess.Write);
         using var gz = new GZipStream(fs, CompressionLevel.Optimal);
         var w = new NbtWriter(gz);
         w.BeginCompound("");
@@ -83,11 +149,11 @@ public static class WorldWriter
         w.EndCompound();
 
         w.WriteString("LevelName", levelName);
-        w.WriteInt("GameType", 1); // creative
-        w.WriteBool("allowCommands", true);
+        w.WriteInt("GameType", gameMode switch { GameMode.Creative => 1, GameMode.Adventure => 2, _ => 0 });
+        w.WriteBool("allowCommands", gameMode == GameMode.Creative);
         w.BeginCompound("difficulty_settings");
-        w.WriteString("difficulty", "peaceful");
-        w.WriteBool("hardcore", false);
+        w.WriteString("difficulty", gameMode == GameMode.Hardcore ? "hard" : difficulty.ToString().ToLowerInvariant());
+        w.WriteBool("hardcore", gameMode == GameMode.Hardcore);
         w.WriteBool("locked", false);
         w.EndCompound();
 
@@ -105,7 +171,7 @@ public static class WorldWriter
         w.EndCompound();
 
         w.BeginCompound("DataPacks");
-        w.WriteStringList("Enabled", ["vanilla"]);
+        w.WriteStringList("Enabled", tallWorld ? ["vanilla", "file/" + TallWorldPackName] : ["vanilla"]);
         w.WriteStringList("Disabled", []);
         w.EndCompound();
 

@@ -4,6 +4,11 @@ export type SourceKind = 'auto' | 'swissAlti3d' | 'dhm200' | 'synthetic';
 export type OutputMode = 'folder' | 'zip';
 export type LandCoverKind = 'tlm3d' | 'tlmRegio' | 'vec25';
 export type BuildingModelKind = 'swissBuildings3d' | 'footprints';
+export type WorldHeightKind = 'auto' | 'standard' | 'tall';
+export type GameModeKind = 'creative' | 'survival' | 'adventure' | 'hardcore';
+export type DifficultyKind = 'peaceful' | 'easy' | 'normal' | 'hard';
+export type GeologyKind = 'none' | 'gk500' | 'geocover';
+export type SurfaceStyleKind = 'none' | 'photo' | 'photoBlocks' | 'siegfried' | 'dufour' | 'nationalMap';
 export type JobState = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
 export interface OverviewStatus {
@@ -42,6 +47,8 @@ export interface Estimate {
   verticalScale: number | null;
   /** Smallest metres-per-block that keeps true proportions, when the current value squeezes the relief. */
   trueProportionMetresPerBlock: number | null;
+  /** Blocks of relief the chosen world height and base Y leave for the terrain. */
+  availableHeight: number;
   warnings: string[];
   ok: boolean;
 }
@@ -87,6 +94,23 @@ export interface JobDto {
   createdAt: string;
   finishedAt: string | null;
   downloadUrl: string | null;
+  /** Live map of the generated terrain, available once the terrain is classified. */
+  mapUrl: string | null;
+  mapCellsPerPixel: number;
+  blocksWide: number;
+  blocksHigh: number;
+  spawnX: number | null;
+  spawnY: number | null;
+  spawnZ: number | null;
+  /** False once the world was opened in Minecraft (then /setworldspawn is the way). */
+  spawnEditable: boolean;
+  /** Stages that have a map snapshot, in order; the last is the newest. */
+  mapStages: string[];
+  mapStage: string | null;
+  chunksWide: number;
+  chunksHigh: number;
+  /** Base64 of one byte per chunk, 1 = written. */
+  chunkMask: string | null;
 }
 
 export interface JobRequest {
@@ -96,6 +120,7 @@ export interface JobRequest {
   source: SourceKind;
   alti3dResolution: number;
   baseY: number;
+  worldHeight: WorldHeightKind;
   verticalScale: number | null;
   waterLevel: number | null;
   waterBodies: boolean;
@@ -110,7 +135,21 @@ export interface JobRequest {
   powerLines: boolean;
   villagers: boolean;
   streetSigns: boolean;
-  geology: boolean;
+  geology: GeologyKind;
+  glacierYear: number;
+  iceToBed: boolean;
+  lakeFloors: boolean;
+  vegetationHeights: boolean;
+  surfaceStyle: SurfaceStyleKind;
+  placeNames: boolean;
+  extras: boolean;
+  jura3d: boolean;
+  wildlife: boolean;
+  crops: boolean;
+  streetLights: boolean;
+  roofColours: boolean;
+  gameMode: GameModeKind;
+  difficulty: DifficultyKind;
   /** Block role overrides: role key -> vanilla block name. */
   blocks: Record<string, string> | null;
   snowLine: number;
@@ -136,7 +175,7 @@ export interface DatasetsStatus {
   tlmRegio: DatasetStatus;
 }
 
-export type BlockGroup = 'terrain' | 'trees' | 'roads' | 'rails' | 'buildings' | 'power' | 'geology';
+export type BlockGroup = 'terrain' | 'trees' | 'roads' | 'rails' | 'buildings' | 'power' | 'geology' | 'extras';
 
 export interface BlockRole {
   key: string;
@@ -148,6 +187,15 @@ export interface BlockRole {
 export interface BlocksInfo {
   roles: BlockRole[];
   choices: string[];
+}
+
+export interface SearchResult {
+  label: string;
+  /** gg25 = municipality, district, gazetteer = place name, address, zipcode, parcel. */
+  origin: string | null;
+  lat: number;
+  lon: number;
+  box: Lv95Rect | null;
 }
 
 export type RegionLevel = 'municipality' | 'district' | 'canton';

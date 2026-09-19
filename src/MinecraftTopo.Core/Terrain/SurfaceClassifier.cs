@@ -13,11 +13,46 @@ public enum Surface : byte
     Vineyard = 8, // grass with bush rows
 }
 
+public enum GeologySource
+{
+    None,
+    /// <summary>GK500, 1:500 000, whole country (map service).</summary>
+    Gk500,
+    /// <summary>GeoCover 1:25 000 sheets where published (per-sheet download), GK500 elsewhere.</summary>
+    GeoCover,
+}
+
+public enum SurfaceStyle
+{
+    None,
+    /// <summary>swissIMAGE orthophoto classified into meadow, cropland, bare soil, rock, sand and snow.</summary>
+    Photo,
+    /// <summary>swissIMAGE colours draped over the ground with the closest coloured blocks.</summary>
+    PhotoBlocks,
+    /// <summary>Siegfried map (1870-1949) draped over the ground.</summary>
+    Siegfried,
+    /// <summary>Dufour map (1845-1865) draped over the ground.</summary>
+    Dufour,
+    /// <summary>Today's national map draped over the ground.</summary>
+    NationalMap,
+}
+
+/// <summary>Extra per-cell inputs to the classifier from optional data sources.</summary>
+public sealed class ClassifyExtras
+{
+    /// <summary>Lake floor elevation (m) per cell, NaN where unknown.</summary>
+    public float[]? LakeBed { get; init; }
+    /// <summary>Ice mask and bed; the grid already carries the ice surface.</summary>
+    public Glaciers.IceModel? Ice { get; init; }
+    /// <summary>Vegetation/canopy height (m) per cell from the surface model.</summary>
+    public float[]? Canopy { get; init; }
+}
+
 /// <summary>Options that control how real elevations map to block columns.</summary>
 public sealed record TerrainOptions
 {
     /// <summary>Lowest terrain block Y (the lowest real elevation lands here).</summary>
-    public int BaseY { get; init; } = 0;
+    public int BaseY { get; init; } = -60;
 
     /// <summary>Blocks per metre of real height; null = auto-fit into the world height.</summary>
     public double? VerticalScale { get; init; }
@@ -55,8 +90,44 @@ public sealed record TerrainOptions
     /// <summary>Standing signs with the street name along named roads (needs roads).</summary>
     public bool StreetSigns { get; init; }
 
-    /// <summary>Rock types underground and on bare rock from the GK500 geological map (lithology main groups).</summary>
-    public bool Geology { get; init; } = true;
+    /// <summary>Rock types underground and on bare rock from the geological maps.</summary>
+    public GeologySource Geology { get; init; } = GeologySource.Gk500;
+
+    /// <summary>Which glacier state to build; years before today raise the surface to the historic ice.</summary>
+    public Glaciers.GlacierYear GlacierYear { get; init; } = Glaciers.GlacierYear.Today;
+
+    /// <summary>Fill today's glaciers with ice down to the modelled bed instead of a thin ice layer.</summary>
+    public bool IceToBed { get; init; } = true;
+
+    /// <summary>Real lake floors from swissBATHY3D where surveyed.</summary>
+    public bool LakeFloors { get; init; } = true;
+
+    /// <summary>Tree heights and crowns from the swissSURFACE3D surface model (about 20 MB per km²).</summary>
+    public bool VegetationHeights { get; init; }
+
+    /// <summary>Colour the ground from an image or map instead of the land cover classes.</summary>
+    public SurfaceStyle SurfaceStyle { get; init; } = SurfaceStyle.None;
+
+    /// <summary>Signs with peak, pass, hut, river, field and place names from swissNAMES3D.</summary>
+    public bool PlaceNames { get; init; } = true;
+
+    /// <summary>Walls, dams, cable cars, sports fields, runways, fountains, summit crosses and more from swissTLM3D.</summary>
+    public bool Extras { get; init; } = true;
+
+    /// <summary>Underground formation boundaries from the swissJURA3D model where it exists (108 MB one-time download).</summary>
+    public bool Jura3d { get; init; }
+
+    /// <summary>Cows, sheep, pigs, chickens and horses on pastures and farms, goats and rabbits in the alpine zone, foxes and wolves in forests, frogs in wetlands, salmon and squid in the water.</summary>
+    public bool Wildlife { get; init; } = true;
+
+    /// <summary>Ripe wheat, carrots, potatoes and beetroots on cropland (orthophoto fields and allotments).</summary>
+    public bool Crops { get; init; } = true;
+
+    /// <summary>Lantern posts every 30 m along streets inside settlements (needs roads and buildings).</summary>
+    public bool StreetLights { get; init; } = true;
+
+    /// <summary>Roof blocks picked from the swissIMAGE colour of each building (needs buildings).</summary>
+    public bool RoofColours { get; init; } = true;
 
     /// <summary>Real elevation (m) above which the surface is snow.</summary>
     public double SnowLine { get; init; } = 2500;
@@ -64,8 +135,24 @@ public sealed record TerrainOptions
     /// <summary>Slope in degrees at or above which the surface is bare stone.</summary>
     public double SlopeStoneDegrees { get; init; } = 32;
 
-    public const int WorldMinY = -64;
-    public const int WorldMaxY = 319;
+    /// <summary>Vanilla height (Y -64..319) or a tall world (Y -2032..2031) enabled through a data pack written into the world.</summary>
+    public WorldHeight WorldHeight { get; init; } = WorldHeight.Standard;
+
+    public int WorldMinY => WorldHeight == WorldHeight.Tall ? TallMinY : StandardMinY;
+    public int WorldMaxY => WorldHeight == WorldHeight.Tall ? TallMaxY : StandardMaxY;
+
+    public const int StandardMinY = -64;
+    public const int StandardMaxY = 319;
+    public const int TallMinY = -2032;
+    public const int TallMaxY = 2031;
+}
+
+public enum WorldHeight
+{
+    /// <summary>384 blocks, Y -64..319, works without any data pack.</summary>
+    Standard,
+    /// <summary>4064 blocks, Y -2032..2031: room for any Swiss relief at 1 m per block; needs the data pack the generator writes into the world.</summary>
+    Tall,
 }
 
 /// <summary>Per-column recipe derived from the height grid.</summary>
@@ -121,10 +208,48 @@ public sealed class ClassifiedTerrain
     public List<VillagerSpawn> Villagers { get; internal set; } = [];
     /// <summary>Church tower height in blocks per column (0 = not a tower cell).</summary>
     public byte[]? BuildingTower { get; internal set; }
+    /// <summary>Building type per column (see <see cref="Water.BuildingKind"/>).</summary>
+    public byte[]? BuildingKind { get; internal set; }
+    /// <summary>Doors, ladders, chimneys and cellars per column (see <see cref="BuildingDetail"/>).</summary>
+    public byte[]? BuildingDetail { get; internal set; }
+    /// <summary>Balcony blocks (planks with a fence on top) outside house walls.</summary>
+    public ChunkIndex<(int X, int Z, int Y)> Balconies { get; internal set; } = new();
+    /// <summary>Deck Y for road/rail/platform cells that are bridges or tunnels (<see cref="NoWater"/> = on the ground).</summary>
+    public short[]? DeckY { get; internal set; }
+    public byte[]? DeckFlags { get; internal set; }
+    /// <summary>Tunnel clearance in blocks above the road surface or the rail.</summary>
+    public int TunnelClearance { get; internal set; } = 5;
     /// <summary>Street name signs indexed by chunk.</summary>
     public ChunkIndex<Water.SignSpec> Signs { get; internal set; } = new();
-    /// <summary>GK500 lithology class per column (1..23, 0 = unknown), null when geology is off.</summary>
+    /// <summary>Bedrock lithology class per column (1..23, 0 = unknown), null when geology is off.</summary>
     public byte[]? Geology { get; set; }
+    /// <summary>Unconsolidated deposit class per column (1..23, 0 = none) forming the top <see cref="DepositBlocks"/> blocks under the soil.</summary>
+    public byte[]? Deposit { get; set; }
+    public int DepositBlocks { get; set; } = 8;
+    /// <summary>Y of the last rock block under the ice per column (glacier columns only); null when no ice model.</summary>
+    public short[]? IceBase { get; set; }
+    /// <summary>Block id that replaces the top block of a land column (0 = none), from imagery or extras.</summary>
+    public byte[]? TopBlock { get; set; }
+    /// <summary>Block id standing on the surface (walls, fences, jetties), 0 = none.</summary>
+    public byte[]? Wall { get; set; }
+    /// <summary>Formation tops from a 3D geological model: lithology class of the unit below and its top Y per column (NoWater = absent).</summary>
+    public (byte Class, short[] Y)[]? Horizons { get; set; }
+    /// <summary>Y of the lowest real elevation (needed to convert further elevations to Y).</summary>
+    public int BaseY { get; internal set; }
+    /// <summary>World height limits this terrain was built for.</summary>
+    public int WorldMinY { get; internal set; } = TerrainOptions.StandardMinY;
+    public int WorldMaxY { get; internal set; } = TerrainOptions.StandardMaxY;
+    /// <summary>Real elevation per column (the height grid data), for biome and wildlife decisions.</summary>
+    public float[]? Elevation { get; set; }
+    /// <summary>Place ripe crops on cropland columns.</summary>
+    public bool Crops { get; set; }
+    /// <summary>Roof block override per column (0 = default roof), from the orthophoto.</summary>
+    public byte[]? RoofBlock { get; set; }
+    /// <summary>Snow line (m) for the snow layer gradient below it.</summary>
+    public double SnowLine { get; internal set; } = 2500;
+
+    /// <summary>Block Y for a real elevation with this terrain's scale.</summary>
+    public int ToY(double elevation) => Math.Clamp(BaseY + (int)Math.Round((elevation - MinElevation) * VerticalScale), WorldMinY + 1, WorldMaxY);
     /// <summary>Block names behind the generator ids for this world.</summary>
     public Anvil.BlockPalette Palette { get; set; } = Anvil.BlockPalette.Default;
 
@@ -169,21 +294,25 @@ public static class SurfaceClassifier
     }
 
     /// <summary>Block rows available for relief above the base Y (with a little headroom).</summary>
-    public static double AvailableHeight(TerrainOptions o) => TerrainOptions.WorldMaxY - 4 - o.BaseY;
+    public static double AvailableHeight(TerrainOptions o) => o.WorldMaxY - 4 - o.BaseY;
 
     /// <summary>
     /// Smallest whole metres-per-block at which the relief keeps true proportions (vertical scale
     /// equal to 1/metresPerBlock) without exceeding the world height.
     /// </summary>
-    public static int TrueProportionMetresPerBlock(TerrainOptions o, float minElev, float maxElev)
+    public static double TrueProportionMetresPerBlock(TerrainOptions o, float minElev, float maxElev)
     {
         double range = Math.Max(maxElev - minElev, 1e-3);
-        return Math.Max(1, (int)Math.Ceiling(range / AvailableHeight(o) - 1e-9));
+        double needed = range / AvailableHeight(o);
+        // sub-metre scales come in halves; above one metre whole metres
+        if (needed <= 0.5) return 0.5;
+        if (needed <= 1) return 1;
+        return Math.Ceiling(needed - 1e-9);
     }
 
     /// <param name="cover">Optional land cover (water, forest) aligned with the grid.</param>
     /// <param name="seed">Seed for deterministic tree placement.</param>
-    public static ClassifiedTerrain Classify(HeightGrid grid, TerrainOptions o, double metresPerBlock, Water.LandCover? cover, long seed, CancellationToken ct)
+    public static ClassifiedTerrain Classify(HeightGrid grid, TerrainOptions o, double metresPerBlock, Water.LandCover? cover, long seed, CancellationToken ct, ClassifyExtras? extras = null)
     {
         var (minElev, maxElev) = grid.Range();
         if (float.IsNaN(minElev)) throw new InvalidOperationException("The height grid has no valid values.");
@@ -194,6 +323,15 @@ public static class SurfaceClassifier
         bool[]? forestMask = o.Trees ? cover?.Forest : null;
         byte[]? coverClass = cover?.Cover;
         if (waterMask is not null && waterMask.Length != w * h) throw new ArgumentException("Land cover size does not match the grid.", nameof(cover));
+        float[]? lakeBed = extras?.LakeBed;
+        var ice = extras?.Ice;
+        short[]? iceBase = ice is null ? null : new short[w * h];
+        if (ice is not null && waterMask is not null)
+        {
+            // Ice wins over water (lakes under the 1850 glaciers, or pro-glacial lakes surveyed as ice).
+            waterMask = (bool[])waterMask.Clone();
+            for (int i = 0; i < waterMask.Length; i++) if (ice.Ice[i]) waterMask[i] = false;
+        }
 
         int? floodY = null;
         if (o.WaterLevel is { } wl && wl > minElev) floodY = ToY(wl);
@@ -223,11 +361,22 @@ public static class SurfaceClassifier
                 Surface s;
                 int wy = ClassifiedTerrain.NoWater;
 
-                if (waterMask is not null && waterMask[i])
+                if (ice is not null && ice.Ice[i])
                 {
-                    // Lake or river: water surface at the DEM level, bed a few blocks below.
+                    // Glacier: the grid carries the ice surface; the bed is the last rock block.
+                    s = Surface.Glacier;
+                    iceBase![i] = (short)Math.Min(y - 1, ToY(ice.Bed[i]));
+                }
+                else if (waterMask is not null && waterMask[i])
+                {
+                    // Lake or river: water surface at the DEM level, bed a few blocks below or as surveyed.
                     wy = ToY(waterSurface![i]);
-                    y = Math.Max(TerrainOptions.WorldMinY + 1, wy - depthBlocks);
+                    y = Math.Max(o.WorldMinY + 1, wy - depthBlocks);
+                    if (lakeBed is not null && !float.IsNaN(lakeBed[i]))
+                    {
+                        int by = ToY(lakeBed[i]);
+                        if (by < y) y = Math.Max(o.WorldMinY + 1, by);
+                    }
                     s = Surface.Water;
                 }
                 else if (floodY is { } fy && y < fy)
@@ -278,19 +427,56 @@ public static class SurfaceClassifier
             Resources = o.Resources,
             Seed = seed,
             MetresPerBlock = metresPerBlock,
+            IceBase = iceBase,
+            DepositBlocks = Math.Max(2, (int)Math.Round(8 * vs)),
+            BaseY = o.BaseY,
+            WorldMinY = o.WorldMinY,
+            WorldMaxY = o.WorldMaxY,
+            SnowLine = o.SnowLine,
         };
         if (cover is not null)
         {
             if (o.Roads && cover.Road is not null) { result.Road = cover.Road; result.RoadFlags = cover.RoadFlags; }
+            if (cover.Deck is { } deck && cover.DeckFlags is { } dflags)
+            {
+                // bridges only where the surveyed deck is clearly above the ground, tunnels only where it is clearly below
+                int clearance = Math.Max(3, (int)Math.Round(5 / metresPerBlock));
+                result.TunnelClearance = clearance;
+                var deckY = new short[w * h];
+                Array.Fill(deckY, ClassifiedTerrain.NoWater);
+                int bridges = 0, tunnels = 0;
+                for (int i = 0; i < deckY.Length; i++)
+                {
+                    if (float.IsNaN(deck[i]) || dflags[i] == 0) continue;
+                    bool usable = (dflags[i] & (Water.DeckFlag.Bridge | Water.DeckFlag.Platform)) != 0 && (o.Roads && result.Road?[i] != 0 || o.Rails && cover.Rail?[i] != 0 || (dflags[i] & Water.DeckFlag.Platform) != 0)
+                                  || (dflags[i] & Water.DeckFlag.Tunnel) != 0 && (o.Roads && result.Road?[i] != 0 || o.Rails && cover.Rail?[i] != 0);
+                    if (!usable) continue;
+                    int dy = ToY(deck[i]);
+                    int ground = waterY[i] != ClassifiedTerrain.NoWater ? Math.Max(topY[i], waterY[i]) : topY[i];
+                    if ((dflags[i] & (Water.DeckFlag.Bridge | Water.DeckFlag.Platform)) != 0)
+                    {
+                        if (dy > ground + 1) { deckY[i] = (short)Math.Min(dy, o.WorldMaxY - 6); bridges++; }
+                    }
+                    else if (dy + clearance + 2 < topY[i])
+                    {
+                        deckY[i] = (short)Math.Max(dy, o.WorldMinY + 2); tunnels++;
+                    }
+                }
+                if (bridges + tunnels > 0) { result.DeckY = deckY; result.DeckFlags = dflags; }
+            }
             if (o.Rails && cover.Rail is not null) result.Rail = cover.Rail;
             if (o.Buildings && cover.BuildingId is not null)
             {
                 if (cover.RoofHeight is not null) PlanMeasuredBuildings(result, cover, seed, ToY);
                 else PlanBuildings(result, cover, metresPerBlock, seed);
+                result.BuildingKind = cover.BuildingKind;
+                BuildingDetails.Plan(result, cover, metresPerBlock);
             }
             // Measured models already contain the real church towers.
             if (o.Buildings && cover.BuildingId is not null && cover.RoofHeight is null) PlanChurchTowers(result, cover, metresPerBlock);
-            if (o.PowerLines || result.BuildingTower is not null) PlanStructures(result, cover, metresPerBlock, o.PowerLines);
+            if (o.PowerLines || result.BuildingTower is not null || cover.Structures.Count > 0) PlanStructures(result, cover, metresPerBlock, o.PowerLines);
+            if (cover.Surface is not null) result.TopBlock = cover.Surface;
+            if (cover.Wall is not null) result.Wall = cover.Wall;
             if (o.Villagers && o.Buildings && cover.BuildingId is not null) result.Villagers = VillagerPlanner.Plan(result, cover, seed);
             if (o.StreetSigns && o.Roads)
             {
@@ -303,8 +489,15 @@ public static class SurfaceClassifier
         {
             result.Forest = forestMask;
             result.CoarseForest = false; // trees are planted at every scale
-            result.Trees = TreePlanner.Plan(grid, result, forestMask, metresPerBlock, seed, coverClass);
-            if (cover is not null) TreePlanner.AddSingleTrees(result, cover.SingleTrees, grid, seed);
+            if (extras?.Canopy is { } canopy && metresPerBlock <= 4)
+            {
+                result.Trees = TreePlanner.PlanFromCanopy(grid, result, forestMask, canopy, vs, metresPerBlock, seed, coverClass);
+            }
+            else
+            {
+                result.Trees = TreePlanner.Plan(grid, result, forestMask, metresPerBlock, seed, coverClass);
+                if (cover is not null) TreePlanner.AddSingleTrees(result, cover.SingleTrees, grid, seed);
+            }
         }
         if (cover is not null && cover.Points.Count > 0 && result.BuildingFlags is not null && cover.BuildingId is not null) ApplyChurchPoints(result, cover);
         return result;
@@ -312,7 +505,7 @@ public static class SurfaceClassifier
         int ToY(double elev)
         {
             int y = o.BaseY + (int)Math.Round((elev - minElev) * vs);
-            return Math.Clamp(y, TerrainOptions.WorldMinY + 1, TerrainOptions.WorldMaxY);
+            return Math.Clamp(y, o.WorldMinY + 1, o.WorldMaxY);
         }
     }
 
@@ -353,7 +546,7 @@ public static class SurfaceClassifier
             // never float above the terrain: at least one column of the footprint must touch the ground
             floorY = Math.Min(floorY, maxTop);
             int roofY = Math.Max(toY(roofH[i]), floorY + 2);
-            if (roofY > TerrainOptions.WorldMaxY - 1) roofY = TerrainOptions.WorldMaxY - 1;
+            if (roofY > t.WorldMaxY - 1) roofY = t.WorldMaxY - 1;
             height[i] = (byte)Math.Clamp(roofY - floorY - 1, 1, 255);
             floor[i] = (short)floorY;
             int x = i % w, z = i / w;
@@ -398,7 +591,7 @@ public static class SurfaceClassifier
             if (id == 0) continue;
             int blocks = Math.Max(2, (int)Math.Round((levels[i] * 3 + 1) / metresPerBlock));
             int f = floorById[id];
-            if (f + blocks + 2 > TerrainOptions.WorldMaxY) blocks = Math.Max(1, TerrainOptions.WorldMaxY - 2 - f);
+            if (f + blocks + 2 > t.WorldMaxY) blocks = Math.Max(1, t.WorldMaxY - 2 - f);
             height[i] = (byte)Math.Min(blocks, 255);
             floor[i] = (short)f;
             byte style = (byte)(TreePlanner.Hash(id, 7, seed ^ 0xB11D) % 3);
@@ -476,7 +669,7 @@ public static class SurfaceClassifier
             int i0 = cz * w + cx;
             int nave = t.BuildingHeight![i0] != 0 ? t.BuildingHeight[i0] : 7;
             int floor = t.BuildingHeight[i0] != 0 ? t.BuildingFloor![i0] : t.ColumnTop(cx, cz);
-            int towerH = Math.Min(StructurePlanner.ChurchTowerHeight(nave, metresPerBlock), TerrainOptions.WorldMaxY - 8 - floor);
+            int towerH = Math.Min(StructurePlanner.ChurchTowerHeight(nave, metresPerBlock), t.WorldMaxY - 8 - floor);
             if (towerH < 4) continue;
             for (int dz = -half; dz <= half; dz++)
                 for (int dx = -half; dx <= half; dx++)
@@ -500,7 +693,8 @@ public static class SurfaceClassifier
     private static void PlanStructures(ClassifiedTerrain t, Water.LandCover cover, double metresPerBlock, bool powerLines)
     {
         var structures = new ChunkIndex<Water.Structure>();
-        IEnumerable<Water.Structure> all = powerLines ? cover.Structures : [];
+        // power structures need the option; everything else (lifts, crosses, fountains, ...) is always built when present
+        IEnumerable<Water.Structure> all = cover.Structures.Where(s => powerLines || s.Kind is not (Water.StructureKind.Tower or Water.StructureKind.Pole or Water.StructureKind.WindTurbine));
         lock (Spires) all = all.Concat(Spires.ToList());
         foreach (var s in all)
         {
@@ -510,11 +704,11 @@ public static class SurfaceClassifier
         t.Structures = structures;
 
         var wires = new ChunkIndex<(Water.Wire, int, int)>();
-        foreach (var wire in powerLines ? cover.Wires : [])
+        foreach (var wire in cover.Wires.Where(wr => powerLines || wr.HeightMetres > 0))
         {
             int g0 = GroundAt(wire.X0, wire.Z0), g1 = GroundAt(wire.X1, wire.Z1);
-            int y0 = g0 + StructurePlanner.LineHeight(wire.HighVoltage, metresPerBlock, TerrainOptions.WorldMaxY - g0);
-            int y1 = g1 + StructurePlanner.LineHeight(wire.HighVoltage, metresPerBlock, TerrainOptions.WorldMaxY - g1);
+            int y0 = g0 + StructurePlanner.WireHeight(wire, metresPerBlock, t.WorldMaxY - g0);
+            int y1 = g1 + StructurePlanner.WireHeight(wire, metresPerBlock, t.WorldMaxY - g1);
             int minX = (int)Math.Floor(Math.Min(wire.X0, wire.X1)) - 3, maxX = (int)Math.Ceiling(Math.Max(wire.X0, wire.X1)) + 3;
             int minZ = (int)Math.Floor(Math.Min(wire.Z0, wire.Z1)) - 3, maxZ = (int)Math.Ceiling(Math.Max(wire.Z0, wire.Z1)) + 3;
             if (maxX < 0 || maxZ < 0 || minX >= t.Width || minZ >= t.Height) continue;

@@ -12,6 +12,13 @@ public sealed class AppPaths
     public string WaterCacheDir => Path.Combine(CacheDir, "water");
     public string Buildings3dCacheDir => Path.Combine(CacheDir, "buildings3d");
     public string GeologyCacheDir => Path.Combine(CacheDir, "geology");
+    public string GlacierCacheDir => Path.Combine(CacheDir, "glaciers");
+    public string BathyCacheDir => Path.Combine(CacheDir, "bathy");
+    public string Surface3dCacheDir => Path.Combine(CacheDir, "surface3d");
+    public string ImageryCacheDir => Path.Combine(CacheDir, "imagery");
+    public string NamesCacheDir => Path.Combine(CacheDir, "names");
+    public string GeoCoverCacheDir => Path.Combine(CacheDir, "geocover");
+    public string Jura3dCacheDir => Path.Combine(CacheDir, "jura3d");
     public string JobsDir => Path.Combine(Root, "jobs");
 
     public AppPaths(string? root = null)
@@ -25,6 +32,13 @@ public sealed class AppPaths
         Directory.CreateDirectory(WaterCacheDir);
         Directory.CreateDirectory(Buildings3dCacheDir);
         Directory.CreateDirectory(GeologyCacheDir);
+        Directory.CreateDirectory(GlacierCacheDir);
+        Directory.CreateDirectory(BathyCacheDir);
+        Directory.CreateDirectory(Surface3dCacheDir);
+        Directory.CreateDirectory(ImageryCacheDir);
+        Directory.CreateDirectory(NamesCacheDir);
+        Directory.CreateDirectory(GeoCoverCacheDir);
+        Directory.CreateDirectory(Jura3dCacheDir);
         Directory.CreateDirectory(JobsDir);
     }
 

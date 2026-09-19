@@ -26,6 +26,17 @@ public static class ApiEndpoints
         };
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyList<MinecraftTopo.Core.Elevation.SwissBathy3dSource.LakeInfo>> LakeCache = new();
+
+    private static async Task<IReadOnlyList<MinecraftTopo.Core.Elevation.SwissBathy3dSource.LakeInfo>> LakesCached(MinecraftTopo.Core.Elevation.SwissBathy3dSource bathy, Lv95Rect area)
+    {
+        string key = $"{Math.Floor(area.MinE / 500)},{Math.Floor(area.MinN / 500)},{Math.Ceiling(area.MaxE / 500)},{Math.Ceiling(area.MaxN / 500)}";
+        if (LakeCache.TryGetValue(key, out var cached)) return cached;
+        var lakes = await bathy.FindLakesAsync(area, CancellationToken.None);
+        LakeCache[key] = lakes;
+        return lakes;
+    }
+
     public static void MapApi(this WebApplication app)
     {
         var api = app.MapGroup("/api");
@@ -56,8 +67,9 @@ public static class ApiEndpoints
             return Results.Ok(new { Elevation = float.IsNaN(v) ? (double?)null : Math.Round(v, 1) });
         });
 
-        api.MapGet("/estimate", (double minE, double minN, double maxE, double maxN, double? mpb, string? source,
-            double? res, int? baseY, double? vscale, Dhm200Model dhm) =>
+        api.MapGet("/estimate", async (double minE, double minN, double maxE, double maxN, double? mpb, string? source,
+            double? res, int? baseY, double? vscale, bool? lakeFloors, bool? canopy, bool? names, string? height,
+            Dhm200Model dhm, MinecraftTopo.Core.Elevation.SwissBathy3dSource bathy, MinecraftTopo.Core.Names.SwissNamesSource namesSource, AppPaths paths) =>
         {
             var area = Lv95Rect.FromCorners(minE, minN, maxE, maxN);
             if (!Enum.TryParse<ElevationSourceKind>(source, ignoreCase: true, out var sourceKind)) sourceKind = ElevationSourceKind.Auto;
@@ -69,14 +81,14 @@ public static class ApiEndpoints
                 MetresPerBlock = mpb is > 0 ? mpb.Value : 1,
                 Source = sourceKind,
                 Alti3dResolution = res ?? 2,
-                Terrain = new TerrainOptions { BaseY = baseY ?? 0, VerticalScale = vscale },
+                Terrain = new TerrainOptions { BaseY = baseY ?? -60, VerticalScale = vscale, WorldHeight = (height ?? "auto").ToLowerInvariant() switch { "tall" => WorldHeight.Tall, "standard" => WorldHeight.Standard, _ => (mpb is > 0 ? mpb.Value : 1) <= 2 ? WorldHeight.Tall : WorldHeight.Standard } },
             };
             var resolved = req.ResolveSource();
             int tiles = resolved == ElevationSourceKind.SwissAlti3d ? SwissAlti3dSource.CountTiles(area) : 0;
             long tileBytes = resolved == ElevationSourceKind.SwissAlti3d ? (req.Alti3dResolution == 2 ? 2_500_000L : 40_000_000L) : 0;
 
             double? elevMin = null, elevMax = null, verticalScale = null;
-            int? trueProportionMpb = null;
+            double? trueProportionMpb = null;
             if (dhm.IsReady && area.Width > 0 && area.Height > 0)
             {
                 var g = dhm.Grid;
@@ -99,8 +111,8 @@ public static class ApiEndpoints
                 {
                     elevMin = Math.Round(mn); elevMax = Math.Round(mx);
                     verticalScale = Math.Round(SurfaceClassifier.ResolveVerticalScale(req.Terrain, mn, mx, req.MetresPerBlock), 4);
-                    int tp = SurfaceClassifier.TrueProportionMetresPerBlock(req.Terrain, mn, mx);
-                    if (tp > req.MetresPerBlock) trueProportionMpb = tp;
+                    double tp = SurfaceClassifier.TrueProportionMetresPerBlock(req.Terrain, mn, mx);
+                    if (tp > req.MetresPerBlock + 1e-9) trueProportionMpb = tp;
                 }
             }
 
@@ -110,7 +122,24 @@ public static class ApiEndpoints
             if (tiles > 200) warnings.Add($"{tiles} swissALTI3D tiles (~{tiles * tileBytes / 1_048_576.0:0} MB) would be downloaded.");
             if (elevMin is null && dhm.IsReady) warnings.Add("The area seems to be outside Switzerland; no elevation data is available there.");
             if (verticalScale is { } vsv && vsv < 1.0 / req.MetresPerBlock - 1e-9) warnings.Add($"Relief is squeezed vertically (scale {vsv:0.###}) to fit the world height." +
-                (trueProportionMpb is { } tpm ? $" True proportions need at least {tpm} m per block." : ""));
+                (trueProportionMpb is { } tpm ? $" True proportions need at least {tpm} m per block" + (req.Terrain.WorldHeight == WorldHeight.Tall ? "." : ", or a tall world.") : ""));
+            // one-time downloads of the optional sources
+            if (lakeFloors == true && resolved != ElevationSourceKind.Synthetic && area.Width * area.Height < 4e9)
+            {
+                try
+                {
+                    var lakes = await LakesCached(bathy, area);
+                    var missing = lakes.Where(l => !File.Exists(Path.Combine(paths.BathyCacheDir, l.Id + ".xyz.zip"))).ToList();
+                    if (missing.Count > 0) warnings.Add($"Lake floors: {string.Join(", ", missing.Select(l => l.Name))} ({missing.Sum(l => l.Bytes ?? 100_000_000) / 1_048_576.0:0} MB) will be downloaded once.");
+                }
+                catch (Exception) { /* offline: no warning */ }
+            }
+            if (canopy == true && req.MetresPerBlock <= 4 && resolved != ElevationSourceKind.Synthetic)
+            {
+                int t2 = SwissAlti3dSource.CountTiles(area);
+                warnings.Add($"Tree heights: {t2} swissSURFACE3D tile{(t2 == 1 ? "" : "s")} (~{t2 * 20} MB, cached after the first run).");
+            }
+            if (names == true && !namesSource.IsReady) warnings.Add("Name signs: swissNAMES3D (33 MB) will be downloaded once.");
 
             return Results.Ok(new
             {
@@ -129,6 +158,7 @@ public static class ApiEndpoints
                 ElevationMax = elevMax,
                 VerticalScale = verticalScale,
                 TrueProportionMetresPerBlock = trueProportionMpb,
+                AvailableHeight = (int)SurfaceClassifier.AvailableHeight(req.Terrain),
                 Warnings = warnings,
                 Ok = req.TotalBlocks <= WorldGenerator.MaxBlocks && area.Width > 0 && area.Height > 0,
             });
@@ -154,6 +184,39 @@ public static class ApiEndpoints
                 });
             }
             return Results.Ok(DatasetDto(tlm, k.Value));
+        });
+
+        // ---- place search (swisstopo location search) -------------------------------------------------
+        api.MapGet("/search", async (string q, Downloader downloader, CancellationToken ct) =>
+        {
+            q = (q ?? "").Trim();
+            if (q.Length < 2) return Results.Ok(Array.Empty<object>());
+            string url = "https://api3.geo.admin.ch/rest/services/api/SearchServer?type=locations&sr=2056&limit=12&searchText=" + Uri.EscapeDataString(q);
+            string json;
+            try { json = await downloader.GetStringAsync(url, ct); }
+            catch (HttpRequestException ex) { return Results.Json(new { error = "Search service not reachable: " + ex.Message }, statusCode: 502); }
+            using var doc = JsonDocument.Parse(json);
+            var list = new List<object>();
+            if (doc.RootElement.TryGetProperty("results", out var results))
+            {
+                foreach (var r in results.EnumerateArray())
+                {
+                    if (!r.TryGetProperty("attrs", out var a)) continue;
+                    string label = System.Text.RegularExpressions.Regex.Replace(a.GetProperty("label").GetString() ?? "", "<[^>]+>", "").Trim();
+                    double lat = a.GetProperty("lat").GetDouble(), lon = a.GetProperty("lon").GetDouble();
+                    object? box = null;
+                    var m = System.Text.RegularExpressions.Regex.Match(a.TryGetProperty("geom_st_box2d", out var b) ? b.GetString() ?? "" : "",
+                        @"BOX\(([\d.]+) ([\d.]+),([\d.]+) ([\d.]+)\)");
+                    if (m.Success)
+                    {
+                        double e1 = double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), n1 = double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+                        double e2 = double.Parse(m.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture), n2 = double.Parse(m.Groups[4].Value, System.Globalization.CultureInfo.InvariantCulture);
+                        if (e2 - e1 > 50 && n2 - n1 > 50) box = new { MinE = e1, MinN = n1, MaxE = e2, MaxN = n2 };
+                    }
+                    list.Add(new { Label = label, Origin = a.TryGetProperty("origin", out var o) ? o.GetString() : null, Lat = lat, Lon = lon, Box = box });
+                }
+            }
+            return Results.Ok(list);
         });
 
         // ---- block roles and choices --------------------------------------------------------------
@@ -259,6 +322,25 @@ public static class ApiEndpoints
                 }
             }
             catch (OperationCanceledException) { /* client went away */ }
+        });
+
+        api.MapGet("/jobs/{id}/map.png", (string id, string? stage, JobManager jobs) =>
+        {
+            var job = jobs.Get(id);
+            if (job?.MapPng is null) return Results.NotFound();
+            byte[] png;
+            lock (job.Sync)
+            {
+                png = stage is null ? job.MapPng : job.Snapshots.LastOrDefault(s => s.Stage == stage).Png ?? job.MapPng;
+            }
+            return Results.Bytes(png, "image/png");
+        });
+
+        api.MapPost("/jobs/{id}/spawn", (string id, SpawnRequestDto body, JobManager jobs) =>
+        {
+            try { return Results.Ok(jobs.SetSpawn(id, body.X, body.Z)); }
+            catch (KeyNotFoundException) { return Results.NotFound(); }
+            catch (InvalidOperationException ex) { return Results.Json(new { error = ex.Message }, statusCode: 409); }
         });
 
         api.MapGet("/jobs/{id}/download", (string id, JobManager jobs) =>

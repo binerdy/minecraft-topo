@@ -13,7 +13,7 @@ import {
 import * as L from 'leaflet';
 import { ApiService } from '../api/api.service';
 import { Lv95Point, Lv95Rect, lv95ToWgs84, rectCorners, rectFromCorners, wgs84ToLv95 } from '../geo/lv95';
-import { RegionInfo } from '../api/models';
+import { RegionInfo, SearchResult } from '../api/models';
 import { AppState } from '../state/app-state.service';
 
 const SWITZERLAND_BOUNDS = L.latLngBounds([45.78, 5.9], [47.85, 10.55]);
@@ -28,6 +28,29 @@ const WMTS = 'https://wmts.geo.admin.ch/1.0.0/{layer}/default/current/3857/{z}/{
     <div #map class="map" [class.drawing]="state.drawMode()" [class.spawning]="state.spawnMode()" [class.regioning]="state.regionMode()"></div>
 
     <div class="map-tools">
+      <div class="search">
+        <input
+          type="search"
+          placeholder="Search place, address, peak…"
+          [value]="query()"
+          (input)="onQuery($any($event.target).value)"
+          (keydown.enter)="pickFirst()"
+          (keydown.escape)="results.set([])"
+          spellcheck="false"
+        />
+        @if (results().length > 0) {
+          <ul class="results">
+            @for (r of results(); track $index) {
+              <li (click)="goTo(r)">
+                <span class="kind">{{ kindLabel(r) }}</span> {{ r.label }}
+              </li>
+            }
+          </ul>
+        }
+        @if (searchError(); as err) {
+          <span class="region-error">{{ err }}</span>
+        }
+      </div>
       <button
         type="button"
         class="draw"
@@ -189,6 +212,46 @@ const WMTS = 'https://wmts.geo.admin.ch/1.0.0/{layer}/default/current/3857/{z}/{
       max-width: 260px;
       line-height: 1.3;
     }
+    .map-tools .search {
+      position: relative;
+    }
+    .map-tools .search input {
+      width: 100%;
+      box-sizing: border-box;
+      font: inherit;
+      padding: 6px 8px;
+      border: 1px solid #888;
+      border-radius: 4px;
+    }
+    .map-tools .results {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      z-index: 1001;
+      margin: 2px 0 0;
+      padding: 0;
+      list-style: none;
+      background: #fff;
+      border: 1px solid #888;
+      border-radius: 4px;
+      max-height: 260px;
+      overflow-y: auto;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    }
+    .map-tools .results li {
+      padding: 5px 8px;
+      cursor: pointer;
+      border-bottom: 1px solid #eee;
+    }
+    .map-tools .results li:hover {
+      background: #e8f0fe;
+    }
+    .map-tools .results .kind {
+      color: #777;
+      font-size: 11px;
+      margin-right: 4px;
+    }
     .map-tools .layer {
       display: flex;
       align-items: center;
@@ -223,6 +286,12 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   readonly mapOpacity = signal(0.6);
   readonly showShade = signal(false);
   readonly showRoads = signal(false);
+  /** Place search over swisstopo's location index. */
+  readonly query = signal('');
+  readonly results = signal<SearchResult[]>([]);
+  readonly searchError = signal<string | null>(null);
+  private searchTimer: ReturnType<typeof setTimeout> | null = null;
+  private searchSeq = 0;
 
   private map!: L.Map;
   private overviewLayer!: L.TileLayer;
@@ -268,6 +337,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       const r = this.state.region();
       if (this.map) this.renderRegion(r);
     });
+
     effect(() => {
       const sp = this.state.effectiveSpawn();
       if (this.map) this.renderSpawn(sp);
@@ -411,10 +481,60 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     else this.shadeLayer.remove();
   }
 
+  onQuery(q: string): void {
+    this.query.set(q);
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    if (q.trim().length < 2) {
+      this.results.set([]);
+      return;
+    }
+    this.searchTimer = setTimeout(() => void this.runSearch(q.trim()), 250);
+  }
+
+  private async runSearch(q: string): Promise<void> {
+    const seq = ++this.searchSeq;
+    try {
+      const r = await this.api.search(q);
+      if (seq === this.searchSeq) {
+        this.results.set(r);
+        this.searchError.set(null);
+      }
+    } catch {
+      if (seq === this.searchSeq) this.searchError.set('Search failed');
+    }
+  }
+
+  pickFirst(): void {
+    const first = this.results()[0];
+    if (first) this.goTo(first);
+  }
+
+  /** Zooms to the result: its bounding box for municipalities and districts, a close view otherwise. */
+  goTo(r: SearchResult): void {
+    this.results.set([]);
+    this.query.set(r.label);
+    if (r.box) this.map.fitBounds(this.toLatLngs(r.box), { padding: [30, 30] });
+    else this.map.setView([r.lat, r.lon], r.origin === 'address' || r.origin === 'parcel' ? 16 : 14);
+  }
+
+  kindLabel(r: SearchResult): string {
+    switch (r.origin) {
+      case 'gg25': return 'Municipality';
+      case 'district': return 'District';
+      case 'kantone': return 'Canton';
+      case 'gazetteer': return 'Place';
+      case 'address': return 'Address';
+      case 'zipcode': return 'Postcode';
+      case 'parcel': return 'Parcel';
+      default: return r.origin ?? '';
+    }
+  }
+
   toggleRoads(on: boolean): void {
     this.showRoads.set(on);
     this.overviewLayer.setUrl(on ? OVERVIEW_URL + '&roads=true' : OVERVIEW_URL);
   }
+
 
 
   // ---- mouse handling -----------------------------------------------------------------------

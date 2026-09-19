@@ -6,7 +6,10 @@ import {
   BuildingModelKind,
   DatasetsStatus,
   Defaults,
+  DifficultyKind,
   Estimate,
+  GameModeKind,
+  GeologyKind,
   JobDto,
   JobRequest,
   LandCoverKind,
@@ -15,6 +18,8 @@ import {
   RegionInfo,
   RegionLevel,
   SourceKind,
+  SurfaceStyleKind,
+  WorldHeightKind,
 } from '../api/models';
 import { Lv95Point, Lv95Rect, rectsEqual, snapRect } from '../geo/lv95';
 
@@ -24,6 +29,7 @@ export interface Settings {
   source: SourceKind;
   alti3dResolution: number;
   baseY: number;
+  worldHeight: WorldHeightKind;
   verticalScaleMode: 'auto' | 'manual';
   verticalScale: number;
   waterEnabled: boolean;
@@ -40,7 +46,22 @@ export interface Settings {
   powerLines: boolean;
   villagers: boolean;
   streetSigns: boolean;
-  geology: boolean;
+  geology: GeologyKind;
+  /** 0 = today, else 2010, 1973 or 1850 (Little Ice Age maximum). */
+  glacierYear: number;
+  iceToBed: boolean;
+  lakeFloors: boolean;
+  vegetationHeights: boolean;
+  surfaceStyle: SurfaceStyleKind;
+  placeNames: boolean;
+  extras: boolean;
+  jura3d: boolean;
+  wildlife: boolean;
+  crops: boolean;
+  streetLights: boolean;
+  roofColours: boolean;
+  gameMode: GameModeKind;
+  difficulty: DifficultyKind;
   /** Block role overrides (role key -> vanilla block name); roles not listed use their default. */
   blocks: Record<string, string>;
   snowLine: number;
@@ -63,7 +84,8 @@ const DEFAULT_SETTINGS: Settings = {
   metresPerBlock: 1,
   source: 'auto',
   alti3dResolution: 2,
-  baseY: 0,
+  baseY: -60,
+  worldHeight: 'auto',
   verticalScaleMode: 'auto',
   verticalScale: 1,
   waterEnabled: false,
@@ -74,19 +96,33 @@ const DEFAULT_SETTINGS: Settings = {
   resources: true,
   landCover: 'tlm3d',
   buildingModel: 'swissBuildings3d',
-  roads: false,
-  rails: false,
-  buildings: false,
-  powerLines: false,
-  villagers: false,
-  streetSigns: false,
-  geology: true,
+  roads: true,
+  rails: true,
+  buildings: true,
+  powerLines: true,
+  villagers: true,
+  streetSigns: true,
+  geology: 'gk500',
+  glacierYear: 0,
+  iceToBed: true,
+  lakeFloors: true,
+  vegetationHeights: true,
+  surfaceStyle: 'photo',
+  placeNames: true,
+  extras: true,
+  jura3d: true,
+  wildlife: true,
+  crops: true,
+  streetLights: true,
+  roofColours: true,
+  gameMode: 'creative',
+  difficulty: 'peaceful',
   blocks: {},
   snowLine: 2500,
   slopeStoneDegrees: 32,
   outputMode: 'folder',
   savesDir: '',
-  replaceExisting: false,
+  replaceExisting: true,
 };
 
 /** Shared application state as signals. */
@@ -106,6 +142,8 @@ export class AppState {
   readonly estimateBusy = signal(false);
   readonly estimateError = signal<string | null>(null);
   readonly job = signal<JobDto | null>(null);
+  /** Area of the running or last job, for the map overlay. */
+  readonly jobArea = signal<Lv95Rect | null>(null);
   readonly jobError = signal<string | null>(null);
   readonly cursor = signal<CursorInfo | null>(null);
   readonly backendError = signal<string | null>(null);
@@ -152,7 +190,7 @@ export class AppState {
     effect(() => {
       const sel = this.selection();
       const s = this.settings();
-      const key = [s.metresPerBlock, s.source, s.alti3dResolution, s.baseY, s.verticalScaleMode, s.verticalScale];
+      const key = [s.metresPerBlock, s.source, s.alti3dResolution, s.baseY, s.worldHeight, s.verticalScaleMode, s.verticalScale, s.lakeFloors, s.waterBodies, s.vegetationHeights, s.trees, s.placeNames];
       void key;
       untracked(() => this.scheduleEstimate(sel));
     });
@@ -327,7 +365,11 @@ export class AppState {
         source: s.source,
         alti3dResolution: s.alti3dResolution,
         baseY: s.baseY,
+        height: s.worldHeight,
         verticalScale: s.verticalScaleMode === 'manual' ? s.verticalScale : null,
+        lakeFloors: s.lakeFloors && s.waterBodies,
+        canopy: s.vegetationHeights && s.trees,
+        names: s.placeNames,
       });
       if (seq === this.estimateSeq) {
         this.estimate.set(est);
@@ -336,7 +378,7 @@ export class AppState {
         if (this.autoScale() && s.verticalScaleMode === 'auto' && tp !== null && tp > s.metresPerBlock) {
           this.scaleNotice.set(
             `Scale raised from ${s.metresPerBlock} to ${tp} m per block so the relief keeps true proportions ` +
-              `(${est.elevationMin} – ${est.elevationMax} m of relief has to fit ${319 - s.baseY - 4} blocks). Pick a scale yourself to override.`,
+              `(${est.elevationMin} – ${est.elevationMax} m of relief has to fit ${est.availableHeight} blocks). Pick a scale yourself to override, or choose the tall world height to keep 1 m per block.`,
           );
           this.updateSettings({ metresPerBlock: tp }, true);
         }
@@ -359,6 +401,7 @@ export class AppState {
       source: s.source,
       alti3dResolution: s.alti3dResolution,
       baseY: s.baseY,
+      worldHeight: s.worldHeight,
       verticalScale: s.verticalScaleMode === 'manual' ? s.verticalScale : null,
       waterLevel: s.waterEnabled ? s.waterLevel : null,
       waterBodies: s.waterBodies,
@@ -374,6 +417,20 @@ export class AppState {
       villagers: s.villagers,
       streetSigns: s.streetSigns,
       geology: s.geology,
+      glacierYear: s.glacierYear,
+      iceToBed: s.iceToBed,
+      lakeFloors: s.lakeFloors,
+      vegetationHeights: s.vegetationHeights,
+      surfaceStyle: s.surfaceStyle,
+      placeNames: s.placeNames,
+      extras: s.extras,
+      jura3d: s.jura3d,
+      wildlife: s.wildlife,
+      crops: s.crops,
+      streetLights: s.streetLights,
+      roofColours: s.roofColours,
+      gameMode: s.gameMode,
+      difficulty: s.difficulty,
       blocks: Object.keys(s.blocks).length > 0 ? s.blocks : null,
       snowLine: s.snowLine,
       slopeStoneDegrees: s.slopeStoneDegrees,
@@ -391,6 +448,7 @@ export class AppState {
     this.jobError.set(null);
     try {
       const job = await this.api.createJob(body);
+      this.jobArea.set(body.area);
       this.job.set(job);
       this.jobSub?.unsubscribe();
       this.jobSub = this.api.streamJob(job.id).subscribe({
@@ -412,6 +470,25 @@ export class AppState {
     }
   }
 
+  /** Moves the spawn point of the current job to a block position on its map. */
+  async setJobSpawn(x: number, z: number): Promise<void> {
+    const j = this.job();
+    if (!j) return;
+    this.jobError.set(null);
+    try {
+      const updated = await this.api.setJobSpawn(j.id, x, z);
+      this.job.set(updated);
+      // keep the S marker on the overview in step with the chosen spawn
+      const area = this.jobArea();
+      if (area && updated.spawnX !== null && updated.spawnZ !== null) {
+        const mpb = this.settings().metresPerBlock;
+        this.spawn.set({ e: Math.round(area.minE + (updated.spawnX + 0.5) * mpb), n: Math.round(area.maxN - (updated.spawnZ + 0.5) * mpb) });
+      }
+    } catch (err) {
+      this.jobError.set(errorMessage(err));
+    }
+  }
+
   async cancelJob(): Promise<void> {
     const j = this.job();
     if (!j) return;
@@ -426,6 +503,7 @@ export class AppState {
     if (this.jobActive()) return;
     this.jobSub?.unsubscribe();
     this.job.set(null);
+    this.jobArea.set(null);
     this.jobError.set(null);
   }
 }

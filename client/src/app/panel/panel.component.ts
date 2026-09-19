@@ -1,11 +1,11 @@
 import { DecimalPipe, NgTemplateOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, HostListener, computed, effect, inject, signal } from '@angular/core';
 import { ApiService } from '../api/api.service';
-import { BlockGroup, BlockRole } from '../api/models';
+import { BlockGroup, BlockRole, JobDto } from '../api/models';
 import { Lv95Rect } from '../geo/lv95';
 import { AppState, Settings } from '../state/app-state.service';
 
-const SCALES = [1, 2, 5, 10, 25, 50, 100];
+const SCALES = [0.5, 1, 2, 5, 10, 25, 50, 100];
 
 @Component({
   selector: 'app-panel',
@@ -70,6 +70,12 @@ export class PanelComponent {
   readonly logLines = computed(() => {
     const j = this.job();
     return j ? j.log.slice(-60) : [];
+  });
+
+  /** Newest first, for a column-reverse list that stays scrolled to the latest line. */
+  readonly logLinesReversed = computed(() => {
+    const j = this.job();
+    return j ? j.log.slice(-120).reverse() : [];
   });
 
   update<K extends keyof Settings>(key: K, value: Settings[K]): void {
@@ -166,6 +172,242 @@ export class PanelComponent {
 
   generate(): void {
     void this.state.startJob();
+  }
+
+  // ---- live map ----------------------------------------------------------------------------------
+
+  readonly fullscreen = signal(false);
+  /** Stage chosen with the chips; null follows the playback. */
+  private readonly selectedStage = signal<string | null>(null);
+  /** Stages that arrived but were not shown yet; each gets StageMillis on screen. */
+  private readonly pending = signal<string[]>([]);
+  /** The stage the playback currently shows (null before the first snapshot). */
+  private readonly playhead = signal<string | null>(null);
+  /** The previous picture, kept under the new one while it fades in. */
+  readonly previousSrc = signal<string | null>(null);
+  private lastShownSrc: string | null = null;
+  private playTimer: ReturnType<typeof setTimeout> | null = null;
+  private seenStages = 0;
+  private seenJobId: string | null = null;
+  private static readonly StageMillis = 1600;
+
+  // Feeds every new snapshot into the playback queue and opens the full-screen view when the first one arrives.
+  private readonly playbackEffect = effect(() => {
+      const j = this.job();
+      if (!j) {
+        this.resetPlayback();
+        return;
+      }
+      if (j.id !== this.seenJobId) {
+        this.resetPlayback();
+        this.seenJobId = j.id;
+      }
+      if (j.mapStages.length > this.seenStages) {
+        const fresh = j.mapStages.slice(this.seenStages);
+        this.seenStages = j.mapStages.length;
+        this.pending.update((p) => [...p, ...fresh]);
+        if (!this.playTimer) this.advance();
+        if (this.seenStages === fresh.length) this.fullscreen.set(true);
+      }
+  });
+
+  private resetPlayback(): void {
+    if (this.playTimer) clearTimeout(this.playTimer);
+    this.playTimer = null;
+    this.pending.set([]);
+    this.playhead.set(null);
+    this.previousSrc.set(null);
+    this.lastShownSrc = null;
+    this.selectedStage.set(null);
+    this.seenStages = 0;
+    this.seenJobId = null;
+  }
+
+  /** Shows the next queued stage and schedules the one after it. */
+  private advance(): void {
+    this.playTimer = null;
+    const queue = this.pending();
+    if (queue.length === 0) return;
+    this.playhead.set(queue[0]);
+    this.pending.set(queue.slice(1));
+    this.playTimer = setTimeout(() => this.advance(), PanelComponent.StageMillis);
+  }
+
+  isPending(stage: string): boolean {
+    return this.pending().includes(stage);
+  }
+
+  stageShown(job: JobDto): string | null {
+    const s = this.selectedStage();
+    if (s && job.mapStages.includes(s)) return s;
+    return this.playhead() ?? job.mapStage;
+  }
+
+  selectStage(stage: string, job: JobDto): void {
+    // choosing the newest stage means "follow along" again
+    this.selectedStage.set(stage === job.mapStage ? null : stage);
+  }
+
+  mapSrc(job: JobDto): string {
+    const s = this.stageShown(job);
+    if (s && s !== job.mapStage && job.mapStages.includes(s)) return `/api/jobs/${job.id}/map.png?stage=${encodeURIComponent(s)}&v=${job.mapStages.length}`;
+    return job.mapUrl ?? '';
+  }
+
+  /** Called when a new picture has loaded: it becomes the backdrop for the next fade. */
+  shown(src: string): void {
+    if (this.lastShownSrc && this.lastShownSrc !== src) this.previousSrc.set(this.lastShownSrc);
+    this.lastShownSrc = src;
+  }
+
+  @HostListener('document:keydown.escape')
+  closeFullscreen(): void {
+    this.fullscreen.set(false);
+  }
+
+  // ---- zoom and pan in full screen ---------------------------------------------------------------
+
+  readonly zoom = signal(1);
+  readonly panX = signal(0);
+  readonly panY = signal(0);
+  readonly dragActive = signal(false);
+  readonly frameTransform = computed(() => `translate(${this.panX()}px, ${this.panY()}px) scale(${this.zoom()})`);
+  private dragStartX = 0;
+  private dragStartY = 0;
+  private panStartX = 0;
+  private panStartY = 0;
+  private dragMoved = false;
+  private readonly resetViewOnToggle = effect(() => {
+    this.fullscreen();
+    this.zoom.set(1);
+    this.panX.set(0);
+    this.panY.set(0);
+  });
+
+  onWheel(ev: WheelEvent): void {
+    if (!this.fullscreen()) return;
+    ev.preventDefault();
+    const frame = (ev.currentTarget as HTMLElement).querySelector('.frame') as HTMLElement | null;
+    if (!frame) return;
+    const rect = frame.getBoundingClientRect();
+    const zoom = this.zoom();
+    const next = Math.min(40, Math.max(1, zoom * Math.exp(-ev.deltaY * 0.0015)));
+    if (next === zoom) return;
+    // keep the point under the cursor where it is
+    const fx = (ev.clientX - rect.left) / zoom;
+    const fy = (ev.clientY - rect.top) / zoom;
+    this.panX.set(this.panX() + (ev.clientX - rect.left) - fx * next);
+    this.panY.set(this.panY() + (ev.clientY - rect.top) - fy * next);
+    this.zoom.set(next);
+    if (next === 1) {
+      this.panX.set(0);
+      this.panY.set(0);
+    }
+  }
+
+  dragStart(ev: MouseEvent): void {
+    if (!this.fullscreen() || ev.button !== 0) return;
+    this.dragActive.set(true);
+    this.dragMoved = false;
+    this.dragStartX = ev.clientX;
+    this.dragStartY = ev.clientY;
+    this.panStartX = this.panX();
+    this.panStartY = this.panY();
+  }
+
+  dragMove(ev: MouseEvent): void {
+    if (!this.dragActive()) return;
+    const dx = ev.clientX - this.dragStartX;
+    const dy = ev.clientY - this.dragStartY;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) this.dragMoved = true;
+    if (this.dragMoved) {
+      this.panX.set(this.panStartX + dx);
+      this.panY.set(this.panStartY + dy);
+    }
+  }
+
+  dragEnd(): void {
+    this.dragActive.set(false);
+  }
+
+  @HostListener('document:keydown', ['$event'])
+  onKey(ev: KeyboardEvent): void {
+    if (!this.fullscreen()) return;
+    const target = ev.target as HTMLElement | null;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA')) return;
+    const step = 80;
+    switch (ev.key) {
+      case 'ArrowLeft': this.panX.update((v) => v + step); break;
+      case 'ArrowRight': this.panX.update((v) => v - step); break;
+      case 'ArrowUp': this.panY.update((v) => v + step); break;
+      case 'ArrowDown': this.panY.update((v) => v - step); break;
+      case '+': case '=': this.zoom.update((z) => Math.min(40, z * 1.25)); break;
+      case '-': this.zoom.update((z) => Math.max(1, z / 1.25)); break;
+      case '0': this.zoom.set(1); this.panX.set(0); this.panY.set(0); break;
+      default: return;
+    }
+    ev.preventDefault();
+  }
+
+  chunksDone(job: JobDto): number {
+    return this.chunkBytes(job).reduce((n, b) => n + (b ? 1 : 0), 0);
+  }
+
+  private chunkBytes(job: JobDto): Uint8Array {
+    if (!job.chunkMask) return new Uint8Array(0);
+    const bin = atob(job.chunkMask);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  /** Dark veil over the chunks not written yet, as a tiny image scaled over the map. */
+  readonly chunkOverlay = computed<string | null>(() => {
+    const j = this.job();
+    if (!j || !j.chunkMask || j.state === 'done') return null;
+    const bytes = this.chunkBytes(j);
+    if (bytes.length !== j.chunksWide * j.chunksHigh) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = j.chunksWide;
+    canvas.height = j.chunksHigh;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    const img = ctx.createImageData(j.chunksWide, j.chunksHigh);
+    for (let i = 0; i < bytes.length; i++) {
+      img.data[i * 4 + 3] = bytes[i] ? 0 : 150;
+    }
+    ctx.putImageData(img, 0, 0);
+    return canvas.toDataURL();
+  });
+
+  /** Spawn of a job in block and LV95 coordinates, or null while unknown. */
+  spawnInfo(job: JobDto): { x: number; y: number; z: number; e: number; n: number } | null {
+    if (job.spawnX === null || job.spawnZ === null) return null;
+    const sel = this.selection();
+    const mpb = this.settings().metresPerBlock;
+    return {
+      x: job.spawnX,
+      y: job.spawnY ?? 0,
+      z: job.spawnZ,
+      e: sel ? sel.minE + job.spawnX * mpb : 0,
+      n: sel ? sel.maxN - job.spawnZ * mpb : 0,
+    };
+  }
+
+  /** Converts a click on the job map into block coordinates and moves the spawn there. */
+  mapClick(ev: MouseEvent, job: JobDto): void {
+    if (this.dragMoved) {
+      this.dragMoved = false;
+      return;
+    }
+    if (!job.spawnEditable) return;
+    const box = (ev.currentTarget as HTMLElement).querySelector('img');
+    if (!box) return;
+    const rect = box.getBoundingClientRect();
+    const fx = (ev.clientX - rect.left) / rect.width;
+    const fz = (ev.clientY - rect.top) / rect.height;
+    if (fx < 0 || fz < 0 || fx > 1 || fz > 1) return;
+    void this.state.setJobSpawn(Math.floor(fx * job.blocksWide), Math.floor(fz * job.blocksHigh));
   }
 
   cancel(): void {

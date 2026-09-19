@@ -12,6 +12,46 @@ public enum RoadMaterial : byte
     Gravel = 4,
     Cobblestone = 5,
     StoneBricks = 6,
+    /// <summary>Outdoor stairways: stone brick stairs facing uphill.</summary>
+    Stairs = 7,
+}
+
+/// <summary>Bits stored per cell in <see cref="LandCover.DeckFlags"/> for roads, railways and platforms that leave the ground.</summary>
+public static class DeckFlag
+{
+    public const byte Bridge = 1;
+    public const byte Tunnel = 2;
+    /// <summary>A pier stands under this deck cell.</summary>
+    public const byte Pier = 4;
+    /// <summary>Covered wooden bridge.</summary>
+    public const byte Covered = 8;
+    /// <summary>Edge of the deck: railing.</summary>
+    public const byte Railing = 16;
+    /// <summary>Tunnel ceiling light above this cell.</summary>
+    public const byte Light = 32;
+    /// <summary>A free-standing deck without road or rail (ski jump inrun).</summary>
+    public const byte Platform = 64;
+}
+
+/// <summary>Building type from the landscape model, per cell in <see cref="LandCover.BuildingKind"/>.</summary>
+public enum BuildingKind : byte
+{
+    House = 0,
+    /// <summary>Open building, canopy, petrol station roof: posts and a roof, no walls.</summary>
+    Open = 1,
+    Tank = 2,
+    Greenhouse = 3,
+    Construction = 4,
+    Tower = 5,
+    Chimney = 6,
+    HighRise = 7,
+    Stadium = 8,
+    Observatory = 9,
+    CarPark = 10,
+    BigWall = 11,
+    /// <summary>Enclosed walkway between buildings.</summary>
+    Walkway = 12,
+    Reservoir = 13,
 }
 
 /// <summary>Bits stored per cell in <see cref="LandCover.RoadFlags"/>.</summary>
@@ -38,7 +78,7 @@ public static class BuildingFlag
 }
 
 /// <summary>Which optional infrastructure classes to fetch and rasterise.</summary>
-public sealed record LandCoverOptions(bool Roads = false, bool Rails = false, bool Buildings = false, bool Power = false, bool Signs = false);
+public sealed record LandCoverOptions(bool Roads = false, bool Rails = false, bool Buildings = false, bool Power = false, bool Signs = false, bool Extras = false, bool Lights = false);
 
 /// <summary>A standing sign with up to four lines of text at grid cell (X, Z), facing <see cref="Rotation"/> (0-15, 0 = south).</summary>
 public sealed record SignSpec(int X, int Z, byte Rotation, string[] Lines);
@@ -69,6 +109,22 @@ public enum StructureKind : byte
     WindTurbine,
     /// <summary>Spire and cross on top of a church tower (BaseY = top of the tower).</summary>
     ChurchSpire,
+    /// <summary>Radio or mobile antenna mast; Size = height in metres.</summary>
+    Antenna,
+    /// <summary>Bus shelter: two posts and a roof.</summary>
+    BusShelter,
+    /// <summary>Cable car, chair lift or ski lift mast; Size = height in metres.</summary>
+    LiftMast,
+    /// <summary>Summit cross.</summary>
+    SummitCross,
+    /// <summary>Village fountain: stone basin with water.</summary>
+    Fountain,
+    /// <summary>Monument or wayside shrine: a small pillar.</summary>
+    Monument,
+    /// <summary>Wayside shrine (Bildstock): post with a lantern.</summary>
+    Shrine,
+    /// <summary>Boundary stone or survey pyramid.</summary>
+    Marker,
 }
 
 /// <summary>
@@ -79,7 +135,7 @@ public enum StructureKind : byte
 public readonly record struct Structure(StructureKind Kind, int X, int Z, double DirX, double DirZ, int Size = 1, int BaseY = int.MinValue);
 
 /// <summary>An overhead wire between two structures, in fractional grid coordinates.</summary>
-public readonly record struct Wire(bool HighVoltage, double X0, double Z0, double X1, double Z1);
+public readonly record struct Wire(bool HighVoltage, double X0, double Z0, double X1, double Z1, int HeightMetres = 0);
 
 /// <summary>Per-cell land cover aligned with a <see cref="HeightGrid"/> (row-major like the grid).</summary>
 public sealed class LandCover
@@ -101,6 +157,15 @@ public sealed class LandCover
     public float[]? RoofHeight { get; init; }
     /// <summary>Measured floor height per cell in metres above sea level, NaN where unknown.</summary>
     public float[]? FloorHeight { get; init; }
+    /// <summary>Top-block override per cell from extras (runways, platforms, dams, allotments), 0 = none.</summary>
+    public byte[]? Surface { get; init; }
+    /// <summary>Block standing on the ground per cell (walls, fences, jetties), 0 = none.</summary>
+    public byte[]? Wall { get; init; }
+    /// <summary>Surveyed height (m a.s.l.) of a road, railway or platform where it is a bridge, tunnel or free-standing deck; NaN elsewhere.</summary>
+    public float[]? Deck { get; init; }
+    public byte[]? DeckFlags { get; init; }
+    /// <summary>Building type per cell (see <see cref="Water.BuildingKind"/>).</summary>
+    public byte[]? BuildingKind { get; init; }
 
     /// <summary>
     /// Returns a copy whose buildings come from a measured model. Footprint building flags (church,
@@ -110,16 +175,23 @@ public sealed class LandCover
     {
         int n = Water.Length;
         var flags = new byte[n];
+        byte[]? kinds = null;
         if (BuildingId is not null && BuildingFlags is not null)
         {
+            kinds = BuildingKind is null ? null : new byte[n];
             for (int i = 0; i < n; i++)
-                if (model.Id[i] != 0 && BuildingId[i] != 0) flags[i] = (byte)(BuildingFlags[i] & (BuildingFlag.Church | BuildingFlag.Industrial));
+                if (model.Id[i] != 0 && BuildingId[i] != 0)
+                {
+                    flags[i] = (byte)(BuildingFlags[i] & (BuildingFlag.Church | BuildingFlag.Industrial));
+                    if (kinds is not null) kinds[i] = BuildingKind![i];
+                }
         }
         return new LandCover
         {
             Water = Water, Forest = Forest, Road = Road, RoadFlags = RoadFlags, Rail = Rail,
             BuildingId = model.Id, BuildingLevels = null, BuildingFlags = flags, RoofHeight = model.RoofHeight, FloorHeight = model.FloorHeight,
             Structures = Structures, Wires = Wires, Signs = Signs, Cover = Cover, Points = Points, SingleTrees = SingleTrees,
+            Surface = Surface, Wall = Wall, Deck = Deck, DeckFlags = DeckFlags, BuildingKind = kinds,
         };
     }
 

@@ -7,6 +7,13 @@ using MinecraftTopo.Core.Nbt;
 /// <summary>Renders a top-down picture of a generated world (highest non-air block per column) for checking results.</summary>
 public static class WorldMap
 {
+    private static (byte, byte, byte)? PaletteColour(string name)
+    {
+        string bare = name.Replace("minecraft:", "");
+        foreach (var c in MinecraftTopo.Core.Anvil.Blocks.ColourPalette) if (c.Name == bare) return (c.R, c.G, c.B);
+        return null;
+    }
+
     private static readonly Dictionary<string, (byte R, byte G, byte B)> Colours = new()
     {
         ["minecraft:grass_block"] = (91, 161, 57), ["minecraft:dirt"] = (134, 96, 67), ["minecraft:stone"] = (125, 125, 125),
@@ -28,6 +35,8 @@ public static class WorldMap
         ["minecraft:terracotta"] = (152, 94, 68), ["minecraft:white_terracotta"] = (210, 178, 161), ["minecraft:granite"] = (150, 103, 86), ["minecraft:polished_granite"] = (155, 108, 90),
         ["minecraft:basalt"] = (80, 80, 85), ["minecraft:polished_tuff"] = (98, 102, 95), ["minecraft:calcite"] = (223, 224, 220), ["minecraft:polished_andesite"] = (132, 135, 134),
         ["minecraft:polished_deepslate"] = (72, 72, 74), ["minecraft:andesite"] = (136, 136, 137), ["minecraft:cobbled_deepslate"] = (77, 77, 80), ["minecraft:blackstone"] = (42, 36, 41), ["minecraft:polished_blackstone"] = (53, 48, 56),
+        ["minecraft:farmland"] = (120, 80, 50), ["minecraft:coarse_dirt"] = (119, 85, 59), ["minecraft:cobblestone_wall"] = (110, 110, 110), ["minecraft:lantern"] = (240, 200, 90),
+        ["minecraft:red_terracotta"] = (143, 61, 47), ["minecraft:oak_planks"] = (162, 130, 78), ["minecraft:chiseled_stone_bricks"] = (120, 120, 120), ["minecraft:podzol"] = (90, 63, 30), ["minecraft:blue_ice"] = (116, 168, 253),
     };
 
     /// <param name="crop">Optional block-coordinate window x0,z0,x1,z1 rendered at <paramref name="scale"/> pixels per block.</param>
@@ -98,7 +107,8 @@ public static class WorldMap
                     histogram[topName[idx]!] = histogram.GetValueOrDefault(topName[idx]!) + 1;
                     int px = ox + (idx & 15), pz = oz + (idx >> 4);
                     var (r, g, b) = Colours.TryGetValue(topName[idx]!, out var c) ? c
-                        : topName[idx]!.Contains("_ore") ? ((byte)200, (byte)200, (byte)90) : ((byte)255, (byte)0, (byte)255);
+                        : topName[idx]!.Contains("_ore") ? ((byte)200, (byte)200, (byte)90)
+                        : PaletteColour(topName[idx]!) ?? ((byte)255, (byte)0, (byte)255);
                     int o = (pz * width + px) * 4;
                     rgba[o] = r; rgba[o + 1] = g; rgba[o + 2] = b; rgba[o + 3] = 255;
                     heights[pz * width + px] = topY[idx];

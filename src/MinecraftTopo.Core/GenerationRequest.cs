@@ -22,6 +22,23 @@ public enum LandCoverKind
     TlmRegio,
 }
 
+public enum GameMode
+{
+    Creative,
+    Survival,
+    Adventure,
+    /// <summary>Survival with one life; the difficulty is locked to hard.</summary>
+    Hardcore,
+}
+
+public enum Difficulty
+{
+    Peaceful,
+    Easy,
+    Normal,
+    Hard,
+}
+
 public enum BuildingModelKind
 {
     /// <summary>swissBUILDINGS3D 3.0: measured heights and real roof shapes (any land cover source).</summary>
@@ -48,6 +65,10 @@ public sealed record GenerationRequest
     public BuildingModelKind BuildingModel { get; init; } = BuildingModelKind.SwissBuildings3d;
     /// <summary>Delete an existing world of the same name before generating.</summary>
     public bool ReplaceExisting { get; init; }
+
+    public GameMode GameMode { get; init; } = GameMode.Creative;
+    /// <summary>Hostile mobs need easy or harder; hardcore ignores this.</summary>
+    public Difficulty Difficulty { get; init; } = Difficulty.Peaceful;
 
     /// <summary>Block role overrides (see <see cref="Anvil.BlockRoles"/>): role key -> vanilla block name.</summary>
     public IReadOnlyDictionary<string, string>? Blocks { get; init; }
